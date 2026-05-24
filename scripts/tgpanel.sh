@@ -309,7 +309,8 @@ menu() {
 ${C_BOLD}${C_CYAN}===============================================
         tgpanel - bot control panel
 ===============================================${C_RESET}
-${C_DIM}Project dir: $PROJECT_DIR${C_RESET}
+${C_DIM}Project dir : $PROJECT_DIR${C_RESET}
+${C_DIM}Developed by: @Alirewa${C_RESET}
 
   ${C_BOLD}1)${C_RESET}  Status (systemd/pm2 + last commit)
   ${C_BOLD}2)${C_RESET}  Live logs
