@@ -62,8 +62,8 @@ async function main(): Promise<void> {
 
   // 3. Bot
   const bot = createBot();
-  logger.info('boot: launching Telegraf (waiting for Telegram polling slot — may take up to 60s if a previous instance was running)');
-  await bot.launch();
+  logger.info('boot: launching Telegraf (dropPendingUpdates=true — clears stale polling lock from old instances)');
+  await bot.launch({ dropPendingUpdates: true });
   logger.info('boot: telegraf launched');
 
   // 4. Verify channel access (non-blocking check, just logs)
