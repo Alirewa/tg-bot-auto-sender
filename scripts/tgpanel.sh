@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# tgpanel — control panel for tg-bot-auto-sender
+# tgpanel - control panel for tg-bot-auto-sender
 # Install:
-#   sudo ln -sf /opt/tg-bot-auto-sender/scripts/tgpanel.sh /usr/local/bin/tgpanel
-#   sudo chmod +x /opt/tg-bot-auto-sender/scripts/tgpanel.sh
-# Then just run:  tgpanel
+#   sudo bash /opt/tg-bot-auto-sender/scripts/install-tgpanel.sh
+# Then run anywhere:
+#   tgpanel
 
 set -u
 
 # ---------- resolve project dir ----------
-# Default: /opt/tg-bot-auto-sender. Override with TGBOT_DIR env.
 PROJECT_DIR="${TGBOT_DIR:-/opt/tg-bot-auto-sender}"
 APP_NAME="tg-bot-auto-sender"
 REPO_URL="https://github.com/Alirewa/tg-bot-auto-sender.git"
@@ -27,12 +26,12 @@ else
 fi
 
 # ---------- helpers ----------
-die()  { echo "${C_RED}✗ $*${C_RESET}" >&2; exit 1; }
-note() { echo "${C_CYAN}» $*${C_RESET}"; }
-ok()   { echo "${C_GREEN}✓ $*${C_RESET}"; }
-warn() { echo "${C_YEL}! $*${C_RESET}"; }
+die()  { echo "${C_RED}[X] $*${C_RESET}" >&2; exit 1; }
+note() { echo "${C_CYAN}[>] $*${C_RESET}"; }
+ok()   { echo "${C_GREEN}[OK] $*${C_RESET}"; }
+warn() { echo "${C_YEL}[!] $*${C_RESET}"; }
 
-pause() { echo; read -rp "$(printf '%sEnter to continue...%s' "$C_DIM" "$C_RESET")" _; }
+pause() { echo; read -rp "$(printf '%sPress Enter to continue...%s' "$C_DIM" "$C_RESET")" _; }
 
 confirm() {
   local prompt="${1:-Are you sure?} [y/N]: "
@@ -55,23 +54,26 @@ pm2_running() {
 
 # ---------- actions ----------
 action_status() {
-  note "وضعیت PM2:"
+  note "PM2 status:"
   if command -v pm2 >/dev/null 2>&1; then
     pm2 status || true
   else
-    warn "pm2 نصب نیست."
+    warn "pm2 is not installed."
   fi
   echo
   if [ -d "$PROJECT_DIR" ]; then
-    note "آخرین commit:"
-    run_in_project git --no-pager log -1 --pretty=format:'%h  %ad  %s%n' --date=short 2>/dev/null || warn "git history در دسترس نیست"
+    note "Latest commit:"
+    run_in_project git --no-pager log -1 --pretty=format:'%h  %ad  %s%n' --date=short 2>/dev/null \
+      || warn "git history unavailable"
   fi
   pause
 }
 
 action_logs() {
-  if ! command -v pm2 >/dev/null 2>&1; then warn "pm2 نصب نیست."; pause; return; fi
-  note "لاگ زنده (Ctrl+C برای خروج)..."
+  if ! command -v pm2 >/dev/null 2>&1; then
+    warn "pm2 is not installed."; pause; return
+  fi
+  note "Live logs (Ctrl+C to exit)..."
   pm2 logs "$APP_NAME" --lines 50 || true
 }
 
@@ -79,9 +81,9 @@ action_restart() {
   need_dir
   if pm2_running; then
     pm2 restart "$APP_NAME"
-    ok "ربات restart شد."
+    ok "Bot restarted."
   else
-    warn "ربات در PM2 پیدا نشد. در حال start..."
+    warn "Bot not found in PM2. Starting it..."
     run_in_project pm2 start ecosystem.config.js
     pm2 save || true
   fi
@@ -91,9 +93,9 @@ action_restart() {
 action_stop() {
   if pm2_running; then
     pm2 stop "$APP_NAME"
-    ok "ربات stop شد."
+    ok "Bot stopped."
   else
-    warn "ربات اجرا نیست."
+    warn "Bot is not running."
   fi
   pause
 }
@@ -106,7 +108,7 @@ action_start() {
     run_in_project pm2 start ecosystem.config.js
     pm2 save || true
   fi
-  ok "ربات start شد."
+  ok "Bot started."
   pause
 }
 
@@ -120,9 +122,9 @@ action_update() {
   run_in_project npm run build || die "build failed"
   if pm2_running; then
     pm2 restart "$APP_NAME"
-    ok "آپدیت کامل و ربات restart شد."
+    ok "Update complete and bot restarted."
   else
-    warn "ربات اجرا نبود؛ با pm2 start شروع می‌کنم..."
+    warn "Bot was not running; starting via pm2..."
     run_in_project pm2 start ecosystem.config.js
     pm2 save || true
   fi
@@ -135,14 +137,14 @@ action_edit_env() {
   if [ ! -f "$env" ]; then
     if [ -f "$PROJECT_DIR/.env.example" ]; then
       cp "$PROJECT_DIR/.env.example" "$env"
-      ok ".env از روی .env.example ساخته شد."
+      ok ".env created from .env.example"
     else
-      die ".env و .env.example هیچ‌کدام وجود ندارند."
+      die ".env and .env.example are both missing."
     fi
   fi
   ${EDITOR:-nano} "$env"
-  if confirm "ربات restart شود تا تغییرات اعمال شود؟"; then
-    if pm2_running; then pm2 restart "$APP_NAME"; ok "restart شد."; fi
+  if confirm "Restart the bot now to apply changes?"; then
+    if pm2_running; then pm2 restart "$APP_NAME"; ok "Restarted."; fi
   fi
   pause
 }
@@ -150,39 +152,41 @@ action_edit_env() {
 action_backup_db() {
   need_dir
   local src="$PROJECT_DIR/data/bot.sqlite"
-  [ -f "$src" ] || { warn "دیتابیس هنوز ساخته نشده: $src"; pause; return; }
+  if [ ! -f "$src" ]; then
+    warn "Database file does not exist yet: $src"; pause; return
+  fi
   local dir="${HOME}/tgbot-backups"
   mkdir -p "$dir"
   local dst="$dir/bot-$(date +%F-%H%M%S).sqlite"
   cp "$src" "$dst"
-  ok "Backup گرفته شد: $dst"
+  ok "Backup saved to: $dst"
   pause
 }
 
 action_install() {
   if [ -d "$PROJECT_DIR" ]; then
-    warn "$PROJECT_DIR از قبل وجود دارد."
+    warn "$PROJECT_DIR already exists."
     pause; return
   fi
-  note "Cloning $REPO_URL → $PROJECT_DIR"
+  note "Cloning $REPO_URL -> $PROJECT_DIR"
   sudo git clone "$REPO_URL" "$PROJECT_DIR" || die "clone failed"
   sudo chown -R "$USER:$USER" "$PROJECT_DIR"
   cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
-  warn "حالا .env را با گزینه ۵ ویرایش کنید."
+  warn "Now edit .env using option 7."
   cd "$PROJECT_DIR" && npm ci && npm run build || die "build failed"
-  ok "نصب پایه انجام شد. با گزینه ۴ start کنید."
+  ok "Base install done. Use option 4 to start the bot."
   pause
 }
 
 action_uninstall() {
-  warn "این عملیات کاملاً پروژه را حذف می‌کند:"
-  echo "  - متوقف و حذف pm2 app: $APP_NAME"
-  echo "  - حذف پوشه: $PROJECT_DIR (شامل data و logs)"
-  echo "  - حذف symlink: /usr/local/bin/tgpanel"
-  if ! confirm "ادامه می‌دهید؟"; then
-    note "لغو شد."; pause; return
+  warn "This will completely remove the project:"
+  echo "  - Stop and delete pm2 app: $APP_NAME"
+  echo "  - Remove directory: $PROJECT_DIR (including data and logs)"
+  echo "  - Remove symlink: /usr/local/bin/tgpanel"
+  if ! confirm "Continue?"; then
+    note "Aborted."; pause; return
   fi
-  if confirm "آیا قبل از حذف از دیتابیس backup گرفته شود؟"; then
+  if confirm "Backup the database first?"; then
     action_backup_db
   fi
   if pm2_running; then
@@ -191,22 +195,22 @@ action_uninstall() {
   fi
   if [ -d "$PROJECT_DIR" ]; then
     sudo rm -rf "$PROJECT_DIR"
-    ok "پوشه پروژه حذف شد."
+    ok "Project directory removed."
   fi
   if [ -L /usr/local/bin/tgpanel ]; then
     sudo rm -f /usr/local/bin/tgpanel
-    ok "symlink tgpanel حذف شد."
+    ok "tgpanel symlink removed."
   fi
-  ok "حذف کامل انجام شد."
+  ok "Uninstall complete."
   exit 0
 }
 
 action_pm2_save() {
   if command -v pm2 >/dev/null 2>&1; then
     pm2 save
-    ok "pm2 process list ذخیره شد."
+    ok "pm2 process list saved."
   else
-    warn "pm2 نصب نیست."
+    warn "pm2 is not installed."
   fi
   pause
 }
@@ -214,7 +218,7 @@ action_pm2_save() {
 action_open_shell() {
   need_dir
   cd "$PROJECT_DIR" || die
-  note "ورود به shell در $PROJECT_DIR (با exit خارج شو)"
+  note "Opening shell in $PROJECT_DIR (type 'exit' to leave)"
   "${SHELL:-/bin/bash}"
 }
 
@@ -222,27 +226,27 @@ action_open_shell() {
 menu() {
   clear
   cat <<EOF
-${C_BOLD}${C_CYAN}╔══════════════════════════════════════════╗
-║          tgpanel — کنترل پنل ربات         ║
-╚══════════════════════════════════════════╝${C_RESET}
-${C_DIM}مسیر پروژه: $PROJECT_DIR${C_RESET}
+${C_BOLD}${C_CYAN}===============================================
+        tgpanel - bot control panel
+===============================================${C_RESET}
+${C_DIM}Project dir: $PROJECT_DIR${C_RESET}
 
-  ${C_BOLD}1)${C_RESET} 📊 وضعیت ربات و آخرین commit
-  ${C_BOLD}2)${C_RESET} 📜 نمایش لاگ زنده
-  ${C_BOLD}3)${C_RESET} ♻️  Restart ربات
-  ${C_BOLD}4)${C_RESET} ▶️  Start ربات
-  ${C_BOLD}5)${C_RESET} ⏸  Stop ربات
-  ${C_BOLD}6)${C_RESET} ⬆️  آپدیت از GitHub (pull + build + restart)
-  ${C_BOLD}7)${C_RESET} ✏️  ویرایش فایل .env
-  ${C_BOLD}8)${C_RESET} 💾 Backup دیتابیس
-  ${C_BOLD}9)${C_RESET} 💿 ذخیره لیست pm2 (pm2 save)
- ${C_BOLD}10)${C_RESET} 🖥  باز کردن shell در پوشه‌ی پروژه
- ${C_BOLD}11)${C_RESET} 📥 نصب پروژه از صفر (clone + build)
- ${C_BOLD}12)${C_RESET} ${C_RED}🗑  حذف کامل پروژه از سرور${C_RESET}
-  ${C_BOLD}0)${C_RESET} ❌ خروج
+  ${C_BOLD}1)${C_RESET}  Status (pm2 + last commit)
+  ${C_BOLD}2)${C_RESET}  Live logs
+  ${C_BOLD}3)${C_RESET}  Restart bot
+  ${C_BOLD}4)${C_RESET}  Start bot
+  ${C_BOLD}5)${C_RESET}  Stop bot
+  ${C_BOLD}6)${C_RESET}  Update from GitHub (pull + build + restart)
+  ${C_BOLD}7)${C_RESET}  Edit .env
+  ${C_BOLD}8)${C_RESET}  Backup database
+  ${C_BOLD}9)${C_RESET}  pm2 save
+ ${C_BOLD}10)${C_RESET}  Open shell in project dir
+ ${C_BOLD}11)${C_RESET}  Fresh install (clone + build)
+ ${C_BOLD}12)${C_RESET}  ${C_RED}Uninstall (remove project)${C_RESET}
+  ${C_BOLD}0)${C_RESET}  Exit
 
 EOF
-  read -rp "انتخاب: " choice
+  read -rp "Choice: " choice
   case "$choice" in
     1) action_status ;;
     2) action_logs ;;
@@ -257,7 +261,7 @@ EOF
     11) action_install ;;
     12) action_uninstall ;;
     0|q|Q) exit 0 ;;
-    *) warn "گزینه نامعتبر"; sleep 1 ;;
+    *) warn "Invalid choice"; sleep 1 ;;
   esac
 }
 
