@@ -3,6 +3,7 @@ import { InlineKeyboardMarkup } from 'telegraf/typings/core/types/typegram';
 import config from '../utils/config';
 import { getPublishChannel } from './publisher';
 import logger from '../utils/logger';
+import { readRecentLogs, readLogsFiltered } from '../utils/logReader';
 import {
   AnalyticsRepo,
   ConfigRepo,
@@ -89,6 +90,10 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     [
       Markup.button.callback('📡 Sub links', 'act:sublink'),
       Markup.button.callback('🔄 Refresh', 'act:menu'),
+    ],
+    [
+      Markup.button.callback('📋 Publish logs', 'act:logs_publish'),
+      Markup.button.callback('📄 All logs', 'act:logs_all'),
     ],
     [
       Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
@@ -237,6 +242,50 @@ function analyticsText(): string {
     `📬 Total published: <b>${totalPosted}</b>`,
     `✅ Publish rate:    <b>${publishSuccessRate}%</b>`,
   ].join('\n');
+}
+
+/** Formats recent log entries for display in Telegram. */
+function logsText(publishOnly = false): string {
+  const SKIP = new Set(['timestamp', 'level', 'message']);
+  const entries = publishOnly
+    ? readLogsFiltered('publish:', 20)
+    : readRecentLogs(20);
+
+  if (entries.length === 0) {
+    return (
+      '<b>📋 Recent Logs</b>\n\n' +
+      'No logs found yet.\n' +
+      'Run /forcescrape or wait for the next publish tick.'
+    );
+  }
+
+  const lines = entries.map((e) => {
+    const icon = e.level === 'error' ? '🔴' : e.level === 'warn' ? '🟡' : '🟢';
+    const ts = String(e.timestamp ?? '');
+    // ISO → HH:MM:SS
+    const time = ts.length >= 19 ? ts.slice(11, 19) : ts.slice(0, 8);
+    // collect extra meta fields
+    const meta: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(e)) {
+      if (!SKIP.has(k)) meta[k] = v;
+    }
+    const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
+    return `${icon} <code>${time}</code> ${escapeHtml(e.message + metaStr)}`;
+  });
+
+  const title = publishOnly
+    ? '<b>📋 Publish Logs</b> (last 20)\n\n'
+    : '<b>📋 Recent Logs</b> (last 20)\n\n';
+
+  let body = lines.join('\n');
+  // Keep well under 4096 chars
+  if (title.length + body.length > 3900) {
+    body = body.slice(-(3900 - title.length));
+    const cut = body.indexOf('\n');
+    if (cut > 0) body = body.slice(cut + 1);
+  }
+
+  return title + body;
 }
 
 function backToMenuKb(): InlineKeyboardMarkup {
@@ -471,6 +520,19 @@ export function registerCommands(bot: Telegraf): void {
     });
   });
 
+  bot.command('logs', async (ctx) => {
+    await ctx.reply(logsText(false), {
+      parse_mode: 'HTML',
+      reply_markup: Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📋 Publish only', 'act:logs_publish'),
+          Markup.button.callback('📄 All logs', 'act:logs_all'),
+        ],
+        [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+      ]).reply_markup,
+    });
+  });
+
   // ---------- inline button callbacks ----------
 
   bot.on('callback_query', async (ctx) => {
@@ -610,6 +672,38 @@ export function registerCommands(bot: Telegraf): void {
             reply_markup: backToMenuKb(),
           });
           return;
+
+        case 'logs_publish': {
+          await ctx.answerCbQuery();
+          const logsKb = Markup.inlineKeyboard([
+            [
+              Markup.button.callback('📋 Publish only', 'act:logs_publish'),
+              Markup.button.callback('📄 All logs', 'act:logs_all'),
+            ],
+            [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+          ]).reply_markup;
+          await ctx.editMessageText(logsText(true), {
+            parse_mode: 'HTML',
+            reply_markup: logsKb,
+          });
+          return;
+        }
+
+        case 'logs_all': {
+          await ctx.answerCbQuery();
+          const logsKb = Markup.inlineKeyboard([
+            [
+              Markup.button.callback('📋 Publish only', 'act:logs_publish'),
+              Markup.button.callback('📄 All logs', 'act:logs_all'),
+            ],
+            [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+          ]).reply_markup;
+          await ctx.editMessageText(logsText(false), {
+            parse_mode: 'HTML',
+            reply_markup: logsKb,
+          });
+          return;
+        }
 
         case 'set_channel':
           awaiting.set(userId, 'set_channel');
