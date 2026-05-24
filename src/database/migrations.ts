@@ -2,10 +2,14 @@ import { Database as DB } from 'better-sqlite3';
 
 export const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
 
-// Default seed sources (added on first boot only). Admin can edit via /addsub /delsub later.
+// Default seed sources — always inserted on boot (INSERT OR IGNORE keeps them idempotent).
+// Admin can add/remove more via /addsub and /delsub inside the bot.
 const DEFAULT_SOURCES = [
   'https://raw.githubusercontent.com/4n0nymou3/multi-proxy-config-fetcher/refs/heads/main/configs/proxy_configs.txt',
   'https://raw.githubusercontent.com/hiddify/hiddify-app/refs/heads/main/test.configs/mahsa',
+  'https://raw.githubusercontent.com/barry-far/V2ray-Config/refs/heads/main/Sub7.txt',
+  'https://raw.githubusercontent.com/barry-far/V2ray-Config/refs/heads/main/Sub2.txt',
+  'https://raw.githubusercontent.com/ebrasha/free-v2ray-public-list/refs/heads/main/vless_configs.txt',
 ];
 
 export function runMigrations(db: DB): void {
@@ -79,10 +83,10 @@ export function runMigrations(db: DB): void {
   // publish_channel can be set from .env or via /setchannel bot command.
   seed.run('publish_channel', process.env['PUBLISH_CHANNEL']?.trim() ?? '');
 
-  const subCount = (
-    db.prepare('SELECT COUNT(*) AS c FROM sub_links').get() as { c: number }
-  ).c;
-  if (subCount === 0) {
+  // Always attempt to insert default sources — INSERT OR IGNORE is safe on duplicates.
+  // This means new sources added to DEFAULT_SOURCES are picked up on the next restart,
+  // even on existing installations that already have some sources.
+  {
     const ins = db.prepare(
       `INSERT OR IGNORE INTO sub_links(url, enabled, created_at) VALUES(?, 1, ?)`,
     );
