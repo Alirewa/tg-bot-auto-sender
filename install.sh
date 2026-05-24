@@ -162,6 +162,18 @@ build_project() {
   ok "Build complete"
 }
 
+# ---------- tgpanel ----------
+install_tgpanel() {
+  local panel="$INSTALL_DIR/scripts/tgpanel.sh"
+  if [ -f "$panel" ]; then
+    sudo chmod +x "$panel"
+    sudo ln -sf "$panel" /usr/local/bin/tgpanel
+    ok "tgpanel installed — type 'tgpanel' anywhere to open the control panel"
+  else
+    warn "tgpanel.sh not found — skipping panel installation"
+  fi
+}
+
 # ---------- systemd service ----------
 install_service() {
   local svc_template="$INSTALL_DIR/scripts/tgbot.service"
@@ -216,7 +228,7 @@ print_summary() {
   printf '%s\n' "  ${BOLD}Logs:${RESET}    journalctl -u ${APP_NAME} -f"
   printf '%s\n' "  ${BOLD}Restart:${RESET} sudo systemctl restart ${APP_NAME}"
   printf '%s\n' "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
-  printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel   (if install-tgpanel.sh was run)"
+  printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel"
   echo
   printf '%s\n' "  ${BOLD}Next steps (inside Telegram):${RESET}"
   printf '%s\n' "  1. Open a chat with your bot."
@@ -240,6 +252,7 @@ main() {
   setup_env
   build_project
   install_service
+  install_tgpanel
   print_summary
 }
 

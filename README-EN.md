@@ -215,9 +215,11 @@ Interactive menu for: update / restart / edit env / backup / logs / uninstall
 ## ❓ Troubleshooting
 
 **Bot is not posting:**
-- Check `/stats` — if the queue is empty, run `/forcescrape`
-- Verify the channel is set with `/setchannel`
+- Open `/start` and check the Auto-send status — if it shows 🔴 OFF, send `/on`
+- The bot automatically disables auto-send when it gets a channel error, and sends you a warning DM
+- Verify the channel is set correctly with `/setchannel`
 - Make sure the bot is an admin in the channel with Post Messages permission
+- Queue empty? Run `/forcescrape`
 
 **`EMFILE` error in logs:**
 
