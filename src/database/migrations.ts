@@ -52,6 +52,21 @@ export function runMigrations(db: DB): void {
       enabled    INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS analytics (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      cycle_at         INTEGER NOT NULL,
+      total_scraped    INTEGER,
+      total_validated  INTEGER,
+      alive_count      INTEGER,
+      dead_count       INTEGER,
+      best_protocol    TEXT,
+      best_country     TEXT,
+      avg_latency_ms   INTEGER,
+      source_count     INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_analytics_cycle_at ON analytics(cycle_at);
   `);
 
   // Seed defaults

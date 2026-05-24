@@ -3,6 +3,7 @@ import { InlineKeyboardMarkup } from 'telegraf/typings/core/types/typegram';
 import config from '../utils/config';
 import logger from '../utils/logger';
 import {
+  AnalyticsRepo,
   ConfigRepo,
   SettingsRepo,
   StatsRepo,
@@ -77,6 +78,10 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     [
       Markup.button.callback('⏳ Scrape now', 'act:scrape'),
       Markup.button.callback('♻️ Re-check queue', 'act:check'),
+    ],
+    [
+      Markup.button.callback('📡 Sub links', 'act:sublink'),
+      Markup.button.callback('📈 Analytics', 'act:analytics'),
     ],
     [
       Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
@@ -156,6 +161,75 @@ function statsText(): string {
     `📥 Queue (RAM):      <b>${queue.size()}</b>`,
     `💾 Queue (DB):       <b>${dbQueued}</b>`,
     `🪦 Dead:             <b>${dbDead}</b>`,
+  ].join('\n');
+}
+
+function sublinkText(): string {
+  const ghRepo = config.githubRepo;
+  const ghBranch = config.githubBranch;
+  const subDir = config.subDir;
+
+  if (!config.githubToken || !ghRepo) {
+    const subsDir = config.subsDir;
+    return [
+      '<b>📡 Subscription Files</b>',
+      '',
+      '⚠️ GitHub publishing not configured.',
+      'Set <code>GITHUB_TOKEN</code> and <code>GITHUB_REPO</code> in .env to get public URLs.',
+      '',
+      '<b>Local files:</b>',
+      `<code>${subsDir}/main.txt</code>     (base64, all)`,
+      `<code>${subsDir}/healthy.txt</code>  (plain text)`,
+      `<code>${subsDir}/vless.txt</code>`,
+      `<code>${subsDir}/vmess.txt</code>`,
+      `<code>${subsDir}/trojan.txt</code>`,
+      `<code>${subsDir}/ss.txt</code>`,
+      `<code>${subsDir}/wireguard.txt</code>`,
+    ].join('\n');
+  }
+
+  const base = `https://raw.githubusercontent.com/${ghRepo}/${ghBranch}/${subDir}`;
+  return [
+    '<b>📡 Subscription Links</b>',
+    '',
+    `All (base64):   <code>${base}/main.txt</code>`,
+    `Healthy (plain):<code>${base}/healthy.txt</code>`,
+    `VLESS:          <code>${base}/vless.txt</code>`,
+    `VMess:          <code>${base}/vmess.txt</code>`,
+    `Trojan:         <code>${base}/trojan.txt</code>`,
+    `SS:             <code>${base}/ss.txt</code>`,
+    `WireGuard:      <code>${base}/wireguard.txt</code>`,
+  ].join('\n');
+}
+
+function analyticsText(): string {
+  const summary = AnalyticsRepo.getSummaryLast24h();
+  if (summary.cycles === 0) {
+    return '<b>📊 Analytics</b>\n\nNo data yet — run a scrape cycle first.';
+  }
+
+  const totalPosted = StatsRepo.get('total_posted');
+  const healthyRatio =
+    summary.totalValidated > 0
+      ? Math.round((summary.totalAlive / summary.totalValidated) * 100)
+      : 0;
+  const publishSuccessRate =
+    summary.totalAlive > 0
+      ? Math.round((totalPosted / Math.max(totalPosted, 1)) * 100)
+      : 0;
+
+  return [
+    '<b>📊 Last 24h Analytics</b>',
+    '',
+    `📦 Cycles run:      <b>${summary.cycles}</b>`,
+    `🧪 Validated:       <b>${summary.totalValidated}</b>`,
+    `🟢 Alive total:     <b>${summary.totalAlive}</b>`,
+    `📉 Healthy ratio:   <b>${healthyRatio}%</b>`,
+    `🏆 Best protocol:   <b>${summary.bestProtocol ?? '—'}</b>`,
+    `🌍 Best country:    <b>${summary.bestCountry ?? '—'}</b>`,
+    `⚡ Avg latency:     <b>${summary.avgLatency !== null ? summary.avgLatency + 'ms' : '—'}</b>`,
+    `📬 Total published: <b>${totalPosted}</b>`,
+    `✅ Publish rate:    <b>${publishSuccessRate}%</b>`,
   ].join('\n');
 }
 
@@ -361,6 +435,21 @@ export function registerCommands(bot: Telegraf): void {
     runCheckWithProgress(ctx, '<b>♻️ Re-checking queue</b>'),
   );
 
+  bot.command('sublink', async (ctx) => {
+    await ctx.reply(sublinkText(), {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: backToMenuKb(),
+    });
+  });
+
+  bot.command('analytics', async (ctx) => {
+    await ctx.reply(analyticsText(), {
+      parse_mode: 'HTML',
+      reply_markup: backToMenuKb(),
+    });
+  });
+
   // ---------- inline button callbacks ----------
 
   bot.on('callback_query', async (ctx) => {
@@ -482,6 +571,23 @@ export function registerCommands(bot: Telegraf): void {
             'Send the new template (e.g. <code>{flag} - #{n} {channel}</code>)\n\n/cancel to abort',
             { parse_mode: 'HTML' },
           );
+          return;
+
+        case 'sublink':
+          await ctx.answerCbQuery();
+          await ctx.editMessageText(sublinkText(), {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_markup: backToMenuKb(),
+          });
+          return;
+
+        case 'analytics':
+          await ctx.answerCbQuery();
+          await ctx.editMessageText(analyticsText(), {
+            parse_mode: 'HTML',
+            reply_markup: backToMenuKb(),
+          });
           return;
 
         default:

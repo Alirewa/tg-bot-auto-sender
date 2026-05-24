@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import { autoTune } from './system';
 
 dotenv.config();
 
@@ -24,6 +25,14 @@ function asInt(name: string, value: string): number {
   return n;
 }
 
+/** Returns the parsed integer only if the env var is explicitly set, otherwise undefined. */
+function optionalInt(name: string): number | undefined {
+  const v = process.env[name];
+  if (!v || v.trim() === '') return undefined;
+  const n = Number.parseInt(v.trim(), 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 export interface AppConfig {
   botToken: string;
   adminUserId: number;
@@ -36,30 +45,49 @@ export interface AppConfig {
   scrapeCron: string;
   dbPath: string;
   logLevel: string;
+  // Subscription file generation
+  subsDir: string;
+  // GitHub auto-publisher (null = feature disabled)
+  githubToken: string | null;
+  githubRepo: string | null;
+  githubBranch: string;
+  subDir: string;
+  githubPushIntervalMs: number;
 }
 
 const publishChannel = required('PUBLISH_CHANNEL');
+
+// Auto-tune from hardware; explicit .env values always override.
+const tuned = autoTune({
+  validationConcurrency: optionalInt('VALIDATION_CONCURRENCY'),
+  maxConfigsPerCycle: optionalInt('MAX_CONFIGS_PER_CYCLE'),
+  tcpTimeoutMs: optionalInt('TCP_TIMEOUT_MS'),
+});
 
 const config: AppConfig = {
   botToken: required('BOT_TOKEN'),
   adminUserId: asInt('ADMIN_USER_ID', required('ADMIN_USER_ID')),
   publishChannel,
   publishChannelHandle: publishChannel,
-  // Defaults tuned for Hetzner CX22 (2 vCPU / 4 GB RAM).
-  // Override in .env if you run on a bigger or smaller box.
-  tcpTimeoutMs: asInt('TCP_TIMEOUT_MS', optional('TCP_TIMEOUT_MS', '2500')),
-  validationConcurrency: asInt(
-    'VALIDATION_CONCURRENCY',
-    optional('VALIDATION_CONCURRENCY', '300'),
-  ),
-  maxConfigsPerCycle: asInt(
-    'MAX_CONFIGS_PER_CYCLE',
-    optional('MAX_CONFIGS_PER_CYCLE', '1200'),
-  ),
+  // Hardware-aware defaults (overridable via .env)
+  tcpTimeoutMs: tuned.tcpTimeoutMs,
+  validationConcurrency: tuned.validationConcurrency,
+  maxConfigsPerCycle: tuned.maxConfigsPerCycle,
   publishCron: optional('PUBLISH_CRON', '* * * * *'),
   scrapeCron: optional('SCRAPE_CRON', '*/10 * * * *'),
   dbPath: path.resolve(optional('DB_PATH', './data/bot.sqlite')),
   logLevel: optional('LOG_LEVEL', 'info'),
+  // Subscription files
+  subsDir: path.resolve(optional('SUBS_DIR', './subs')),
+  // GitHub (optional feature)
+  githubToken: process.env['GITHUB_TOKEN']?.trim() || null,
+  githubRepo: process.env['GITHUB_REPO']?.trim() || null,
+  githubBranch: optional('GITHUB_BRANCH', 'main'),
+  subDir: optional('SUB_DIR', 'subs'),
+  githubPushIntervalMs: asInt(
+    'GITHUB_PUSH_INTERVAL_MS',
+    optional('GITHUB_PUSH_INTERVAL_MS', '300000'),
+  ),
 };
 
 export default config;

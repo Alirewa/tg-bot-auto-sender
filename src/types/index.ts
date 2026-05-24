@@ -1,4 +1,4 @@
-export type Protocol = 'vmess' | 'vless' | 'trojan' | 'ss';
+export type Protocol = 'vmess' | 'vless' | 'trojan' | 'ss' | 'wireguard';
 
 export interface ParsedConfig {
   hash: string;

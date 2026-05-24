@@ -1,20 +1,58 @@
 # tg-bot-auto-sender
 
-ربات تلگرام **ادمین‌محور** برای جمع‌آوری، اعتبارسنجی و انتشار خودکار کانفیگ‌های V2Ray / VLESS / VMess / Trojan / Shadowsocks در یک کانال تلگرام.
+**پلتفرم حرفه‌ای جمع‌آوری، اعتبارسنجی و انتشار خودکار کانفیگ‌های VPN**
 
-- ربات فقط به **یک کاربر ادمین** (تنظیم‌شده در `.env`) پاسخ می‌دهد. کاربران معمولی به‌طور خاموش نادیده گرفته می‌شوند.
+> V2Ray / VLESS / REALITY / VMess / Trojan / Shadowsocks / WireGuard
+
+---
+
+## معماری Pipeline
+
+```
+Scrape Sources (Sub URLs از DB)
+        ↓
+Parse & Normalize
+        ↓
+Deduplicate (SHA-256 دائمی)
+        ↓
+TCP Health Check + GeoIP
+        ↓
+Rename / Brand configs
+        ↓
+┌──────────────────────────────────┐
+│  Generate Internal Subscription  │
+│  subs/main.txt  (base64, همه)    │
+│  subs/vless.txt  subs/vmess.txt  │
+│  subs/trojan.txt subs/ss.txt     │
+│  subs/wireguard.txt              │
+└──────────────────┬───────────────┘
+                   │
+         ┌─────────┴──────────┐
+         ↓                    ↓
+  GitHub Repo           Telegram Channel
+  (auto push)           (1 config/min)
+```
+
+- ربات فقط به **یک کاربر ادمین** پاسخ می‌دهد. بقیه نادیده گرفته می‌شوند.
+- سیستم **خودکار** منابع، CPU و RAM را تشخیص می‌دهد و مقادیر بهینه را تنظیم می‌کند.
+- هر ۱۰ دقیقه یک چرخه‌ی کامل Scrape + Validate اجرا می‌شود.
 - هر ۶۰ ثانیه یک کانفیگ سالم در کانال منتشر می‌شود.
-- نام هر کانفیگ طبق قالب قابل تنظیم بازنویسی می‌شود — پیش‌فرض:
-  ```
-  🇩🇪 - #1 @webdw
-  🇫🇷 - #2 @webdw
-  🇺🇸 - #3 @webdw
-  ```
+- فایل‌های Subscription بعد از هر چرخه به‌روز می‌شوند.
 - اعتبارسنجی واقعی TCP + GeoIP آفلاین (geoip-lite).
-- لینک‌های Subscription از داخل خود ربات قابل افزودن/حذف هستند.
 - ضد تکرار دائمی با SQLite.
+- آنالیتیکس کامل با آمار ۲۴ ساعته.
 
 نصب کامل: **[DEPLOY.md](./DEPLOY.md)**
+
+---
+
+## 🚀 نصب یک‌خطی (Ubuntu 20.04+)
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Alirewa/tg-bot-auto-sender/main/install.sh)
+```
+
+Wizard تعاملی همه‌چیز را می‌پرسد و سرویس systemd را راه‌اندازی می‌کند.
 
 ---
 
@@ -23,12 +61,31 @@
 ### وضعیت و کنترل
 | دستور | کاربرد |
 |---|---|
-| `/start` یا `/help` | منوی ادمین |
-| `/status` | وضعیت کامل (auto-send، قالب، شمارنده، تعداد منابع، صف) |
+| `/start` یا `/help` | منوی اصلی ادمین |
+| `/status` | وضعیت کامل (auto-send، قالب، شمارنده، منابع، صف) |
 | `/on` | روشن‌کردن ارسال خودکار |
 | `/off` | خاموش‌کردن ارسال خودکار |
-| `/stats` | آمار |
+| `/stats` | آمار کلی |
 | `/ping` | تست سلامت + uptime |
+| `/analytics` | آنالیتیکس ۲۴ ساعته (بهترین پروتکل، کشور، نسبت سالم) |
+
+### لینک‌های Subscription
+| دستور | کاربرد |
+|---|---|
+| `/sublink` | لینک‌های raw GitHub برای همه فایل‌های sub |
+
+فرمت پیام نمونه:
+```
+📡 Subscription Links
+
+All (base64):   https://raw.githubusercontent.com/user/repo/main/subs/main.txt
+Healthy (plain):https://raw.githubusercontent.com/user/repo/main/subs/healthy.txt
+VLESS:          https://raw.githubusercontent.com/user/repo/main/subs/vless.txt
+VMess:          https://raw.githubusercontent.com/user/repo/main/subs/vmess.txt
+Trojan:         https://raw.githubusercontent.com/user/repo/main/subs/trojan.txt
+SS:             https://raw.githubusercontent.com/user/repo/main/subs/ss.txt
+WireGuard:      https://raw.githubusercontent.com/user/repo/main/subs/wireguard.txt
+```
 
 ### قالب ارسال
 | دستور | کاربرد |
@@ -39,7 +96,7 @@
 
 پلیس‌هولدرها: `{flag}` `{n}` `{channel}` `{country}`
 
-### مدیریت لینک‌های Subscription
+### مدیریت منابع Subscription
 | دستور | کاربرد |
 |---|---|
 | `/listsubs` | لیست منابع همراه id |
@@ -55,72 +112,124 @@
 
 ---
 
+## فرمت پست کانال
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━
+🇩🇪 Germany  ⚡ VLESS
+📶 Ping: 82ms  🟢 Online
+━━━━━━━━━━━━━━━━━━━━━━━
+
+<config URI>
+
+🔗 Join: @channel
+#config #v2ray #vpn #vless
+```
+
+---
+
 ## متغیرهای محیطی
 
-| متغیر | اجباری | توضیح |
+### اجباری
+| متغیر | توضیح |
+|---|---|
+| `BOT_TOKEN` | توکن از `@BotFather` |
+| `ADMIN_USER_ID` | آی‌دی عددی تنها ادمین |
+| `PUBLISH_CHANNEL` | مثل `@webdw` (ربات باید ادمین کانال باشد) |
+
+### اختیاری — زمان‌بندی
+| متغیر | پیش‌فرض | توضیح |
 |---|---|---|
-| `BOT_TOKEN` | ✅ | توکن از `@BotFather` |
-| `ADMIN_USER_ID` | ✅ | آی‌دی عددی تنها ادمین |
-| `PUBLISH_CHANNEL` | ✅ | مثل `@webdw` (ربات باید ادمین کانال باشد) |
-| `TCP_TIMEOUT_MS` | ❌ | پیش‌فرض `2500` — کمتر = اسکرپ سریع‌تر، false-negative بیشتر |
-| `VALIDATION_CONCURRENCY` | ❌ | پیش‌فرض `300` (مناسب Hetzner CX22) — برای سرور قوی‌تر ۵۰۰-۸۰۰ |
-| `MAX_CONFIGS_PER_CYCLE` | ❌ | پیش‌فرض `1200` — sample تصادفی برای جلوگیری از قفل شدن چرخه |
+| `PUBLISH_CRON` | `* * * * *` | هر دقیقه یک کانفیگ |
+| `SCRAPE_CRON` | `*/10 * * * *` | هر ۱۰ دقیقه یک چرخه‌ی scrape |
 
-## 🖥 تنظیمات پیشنهادی بر اساس سرور
-
-| سرور | `VALIDATION_CONCURRENCY` | `MAX_CONFIGS_PER_CYCLE` |
+### اختیاری — کارایی (خودکار تشخیص داده می‌شود)
+| متغیر | پیش‌فرض خودکار | توضیح |
 |---|---|---|
-| Hetzner CX11 (1 vCPU / 2 GB) | 150 | 600 |
-| **Hetzner CX22 (2 vCPU / 4 GB)** ← پیش‌فرض | **300** | **1200** |
-| Hetzner CX32 (4 vCPU / 8 GB) | 600 | 2500 |
-| CPX/AX series (8+ vCPU) | 1000+ | 5000 |
+| `VALIDATION_CONCURRENCY` | بر اساس CPU/RAM | تعداد probe های موازی |
+| `MAX_CONFIGS_PER_CYCLE` | بر اساس CPU/RAM | حداکثر کانفیگ در هر چرخه |
+| `TCP_TIMEOUT_MS` | `2500` یا `3000` | timeout هر TCP probe |
 
-روی CX22 با concurrency=300 یک چرخه‌ی ۱۲۰۰ تایی معمولاً **۱۰-۲۰ ثانیه** طول می‌کشد.
+**تشخیص خودکار:**
+| سرور | `CONCURRENCY` | `MAX_CONFIGS` |
+|---|---|---|
+| ۱ vCPU / ۲ GB | 100 | 400 |
+| **۲ vCPU / ۴ GB** | **300** | **1200** |
+| ۴ vCPU / ۸ GB | 600 | 2500 |
+| ۸+ vCPU | 1000 | 5000 |
 
-### اگر TCP probe خطای `EMFILE` گرفت
+اگر می‌خواهید مقادیر را override کنید، در `.env` تنظیم کنید.
 
-به این معنی است که ulimit پایین است. در سرور:
+### اختیاری — ذخیره‌سازی
+| متغیر | پیش‌فرض | توضیح |
+|---|---|---|
+| `DB_PATH` | `./data/bot.sqlite` | مسیر دیتابیس SQLite |
+| `SUBS_DIR` | `./subs` | مسیر فایل‌های subscription محلی |
+| `LOG_LEVEL` | `info` | `error|warn|info|debug` |
+
+### اختیاری — GitHub Auto-Publisher
+| متغیر | توضیح |
+|---|---|
+| `GITHUB_TOKEN` | Personal Access Token با دسترسی `repo write` — خالی = غیرفعال |
+| `GITHUB_REPO` | مثل `myuser/v2ray-subs` |
+| `GITHUB_BRANCH` | پیش‌فرض `main` |
+| `SUB_DIR` | زیرشاخه داخل repo، پیش‌فرض `subs` |
+| `GITHUB_PUSH_INTERVAL_MS` | پیش‌فرض `300000` (5 دقیقه) |
+
+---
+
+## ساختار پروژه
+
+```
+src/
+  bot/           # Telegraf + admin gate + commands + publisher
+  scraper/       # axios + parser (vmess/vless/trojan/ss/wireguard)
+  validator/     # TCP probe + p-limit concurrency
+  geoip/         # geoip-lite + flag emoji
+  scheduler/     # node-cron + publish queue + analytics recording
+  subscriptions/ # subscription file generator (per-protocol .txt files)
+  github/        # GitHub Contents API auto-publisher
+  database/      # better-sqlite3 + migrations + repositories + AnalyticsRepo
+  utils/         # config / logger / retry / escape / renamer / system (auto-tune)
+  types/
+  index.ts
+subs/            # generated subscription files (gitignored locally)
+data/            # SQLite DB (gitignored)
+logs/            # winston logs (gitignored)
+scripts/
+  tgpanel.sh          # interactive control panel
+  install-tgpanel.sh  # installer for tgpanel command
+  tgbot.service       # systemd service template
+install.sh            # one-line Ubuntu installer
+```
+
+---
+
+## اگر TCP probe خطای `EMFILE` گرفت
+
 ```bash
 echo '* soft nofile 65535' | sudo tee -a /etc/security/limits.conf
 echo '* hard nofile 65535' | sudo tee -a /etc/security/limits.conf
 # سپس logout و دوباره login، یا reboot
 ```
-| `PUBLISH_CRON` | ❌ | پیش‌فرض `* * * * *` |
-| `SCRAPE_CRON` | ❌ | پیش‌فرض `*/10 * * * *` |
-| `DB_PATH` | ❌ | پیش‌فرض `./data/bot.sqlite` |
-| `LOG_LEVEL` | ❌ | `error|warn|info|debug` |
 
 ---
 
-## ساختار
-
-```
-src/
-  bot/          # Telegraf + adminGate + commands + publisher (rename + template)
-  scraper/      # axios + parser (sub URLs از DB می‌آیند)
-  validator/    # TCP probe + p-limit
-  geoip/        # geoip-lite + flag emoji
-  scheduler/    # node-cron + auto_send toggle + صف
-  database/     # better-sqlite3 + migrations + repositories
-  utils/        # config / logger / retry / escape / renamer
-  types/
-  index.ts
-```
-
 ## 🛠 ابزار `tgpanel`
-
-روی سرور Ubuntu بعد از clone می‌توانی این دستور را نصب کنی:
 
 ```bash
 sudo bash scripts/install-tgpanel.sh
+tgpanel
 ```
 
-سپس با `tgpanel` یک منوی متنی باز می‌شود که شامل:
-update / restart / start / stop / edit env / backup / logs / uninstall.
+منوی تعاملی: update / restart / start / stop / edit env / backup / sub links / logs / uninstall
+
+---
 
 ## اجرای لوکال
 ```bash
 cp .env.example .env
+# مقادیر .env را پر کنید
 npm ci
 npm run build
 npm start       # یا: npm run dev
