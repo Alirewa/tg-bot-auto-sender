@@ -238,6 +238,19 @@ async function publishTick(bot: Telegraf): Promise<void> {
           if (err.disableAutoSend) {
             SettingsRepo.setBool('auto_send', false);
             logger.error('publish: auto_send disabled — fix channel permissions and re-enable');
+            // Notify the admin via DM so they don't have to check logs.
+            bot.telegram
+              .sendMessage(
+                config.adminUserId,
+                '⚠️ <b>Auto-send has been disabled!</b>\n\n' +
+                  'Telegram rejected the last publish attempt.\n' +
+                  `Error: <code>${err.message}</code>\n\n` +
+                  'Fix the channel permissions, then send /on to re-enable.',
+                { parse_mode: 'HTML' },
+              )
+              .catch(() => {
+                /* ignore — bot might not have DM access yet */
+              });
           }
         } else {
           // Transient (network, 5xx) — just log and skip, config stays in DB as queued.
