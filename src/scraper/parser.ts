@@ -2,8 +2,9 @@ import * as crypto from 'crypto';
 import { ParsedConfig, Protocol } from '../types';
 import logger from '../utils/logger';
 
-const PROTOCOL_RE = /(vmess:\/\/[^\s]+|vless:\/\/[^\s]+|trojan:\/\/[^\s]+|ss:\/\/[^\s]+)/gi;
-const PROTOCOL_DETECT_RE = /(vmess|vless|trojan|ss):\/\//i;
+const PROTOCOL_RE =
+  /(vmess:\/\/[^\s]+|vless:\/\/[^\s]+|trojan:\/\/[^\s]+|ss:\/\/[^\s]+|wireguard:\/\/[^\s]+)/gi;
+const PROTOCOL_DETECT_RE = /(vmess|vless|trojan|ss|wireguard):\/\//i;
 
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
@@ -189,6 +190,26 @@ function parseSs(raw: string): { host: string; port: number } | null {
   }
 }
 
+function parseWireguard(raw: string): { host: string; port: number } | null {
+  // wireguard://PRIVATE_KEY@ENDPOINT:PORT?publickey=...#NAME
+  try {
+    const body = raw.slice('wireguard://'.length);
+    const atIdx = body.indexOf('@');
+    if (atIdx < 0) return null;
+    let rest = body.slice(atIdx + 1);
+    const cut = rest.search(/[?#]/);
+    if (cut >= 0) rest = rest.slice(0, cut);
+    const colon = rest.lastIndexOf(':');
+    if (colon < 0) return null;
+    const host = rest.slice(0, colon).trim();
+    const port = Number.parseInt(rest.slice(colon + 1), 10);
+    if (!host || !Number.isFinite(port) || port <= 0 || port > 65535) return null;
+    return { host, port };
+  } catch {
+    return null;
+  }
+}
+
 function extractHostPort(
   protocol: Protocol,
   raw: string,
@@ -202,17 +223,20 @@ function extractHostPort(
       return parseUserinfoUrl(raw, 'trojan');
     case 'ss':
       return parseSs(raw);
+    case 'wireguard':
+      return parseWireguard(raw);
     default:
       return null;
   }
 }
 
 function detectProtocol(raw: string): Protocol | null {
-  const lower = raw.slice(0, 10).toLowerCase();
+  const lower = raw.slice(0, 12).toLowerCase();
   if (lower.startsWith('vmess://')) return 'vmess';
   if (lower.startsWith('vless://')) return 'vless';
   if (lower.startsWith('trojan://')) return 'trojan';
   if (lower.startsWith('ss://')) return 'ss';
+  if (lower.startsWith('wireguard://')) return 'wireguard';
   return null;
 }
 

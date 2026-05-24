@@ -3,11 +3,13 @@ import config from '../utils/config';
 import logger from '../utils/logger';
 import { scrapeAll } from '../scraper';
 import { validateStreaming, ProgressCallback } from '../validator';
-import { ConfigRepo, SettingsRepo, StatsRepo } from '../database/repositories';
+import { AnalyticsRepo, ConfigRepo, SettingsRepo, StatsRepo } from '../database/repositories';
 import { queue } from './queue';
-import { publishConfig } from '../bot/publisher';
+import { publishConfig, PublishError } from '../bot/publisher';
 import { Telegraf } from 'telegraf';
-import { ParsedConfig } from '../types';
+import { ParsedConfig, ValidatedConfig } from '../types';
+import { generateAndWriteSubs } from '../subscriptions';
+import { getGithubPublisher } from '../github';
 
 let publishTask: ScheduledTask | null = null;
 let scrapeTask: ScheduledTask | null = null;
@@ -93,6 +95,8 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
 
     let added = 0;
     const seenInThisCycle = new Set<string>();
+    // Collect alive configs for subscription generation.
+    const aliveConfigs: ValidatedConfig[] = [];
 
     // Streaming: each alive config goes straight into the DB queue and the
     // in-memory publish queue the instant its probe returns.
@@ -101,6 +105,7 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
       onAlive: (v) => {
         if (seenInThisCycle.has(v.hash)) return;
         seenInThisCycle.add(v.hash);
+        aliveConfigs.push(v); // collect for subscription generation
         try {
           ConfigRepo.insertValidated(v);
           StatsRepo.increment('total_validated', 1);
@@ -131,6 +136,57 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
       fresh: sample.length,
       alive: alive.length,
     });
+
+    // Record analytics for this cycle.
+    try {
+      const protoCounts: Record<string, number> = {};
+      let latencySum = 0;
+      for (const v of aliveConfigs) {
+        protoCounts[v.protocol] = (protoCounts[v.protocol] ?? 0) + 1;
+        latencySum += v.latencyMs;
+      }
+      const bestProtocol = aliveConfigs.length
+        ? (Object.entries(protoCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null)
+        : null;
+      const countryCounts: Record<string, number> = {};
+      for (const v of aliveConfigs) {
+        if (v.country) countryCounts[v.country] = (countryCounts[v.country] ?? 0) + 1;
+      }
+      const bestCountry = aliveConfigs.length
+        ? (Object.entries(countryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null)
+        : null;
+
+      AnalyticsRepo.insertCycle({
+        cycle_at: Date.now(),
+        total_scraped: parsed.length,
+        total_validated: sample.length,
+        alive_count: alive.length,
+        dead_count: sample.length - alive.length,
+        best_protocol: bestProtocol,
+        best_country: bestCountry,
+        avg_latency_ms:
+          aliveConfigs.length > 0 ? Math.round(latencySum / aliveConfigs.length) : null,
+        source_count: aliveConfigs.length,
+      });
+    } catch (err) {
+      logger.debug('analytics: insert failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    // Generate subscription files from alive configs (non-blocking — errors are caught).
+    if (aliveConfigs.length > 0) {
+      try {
+        await generateAndWriteSubs(aliveConfigs, {
+          subsDir: config.subsDir,
+          githubPublisher: getGithubPublisher(),
+        });
+      } catch (err) {
+        logger.error('subscriptions: generation failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     return { scraped: parsed.length, fresh: sample.length, alive: alive.length, added };
   } catch (err) {
@@ -171,10 +227,35 @@ async function publishTick(bot: Telegraf): Promise<void> {
         latencyMs: next.latencyMs,
       });
     } catch (err) {
-      logger.error('publish: send failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      ConfigRepo.markDead(next.hash);
+      if (err instanceof PublishError) {
+        if (err.permanent) {
+          // 400/401/403 — this config itself is not the problem; don't lose it.
+          // Re-queue so it can be tried next cycle.
+          queue.enqueueMany([next]);
+          logger.warn('publish: re-queued config after permanent channel error', {
+            hash: next.hash.slice(0, 12),
+          });
+          if (err.disableAutoSend) {
+            SettingsRepo.setBool('auto_send', false);
+            logger.error('publish: auto_send disabled — fix channel permissions and re-enable');
+          }
+        } else {
+          // Transient (network, 5xx) — just log and skip, config stays in DB as queued.
+          logger.warn('publish: transient failure, config kept queued', {
+            hash: next.hash.slice(0, 12),
+            error: err.message,
+          });
+          // Re-insert into memory queue for next tick.
+          queue.enqueueMany([next]);
+        }
+      } else {
+        // Unknown error — mark dead to avoid infinite retry loops.
+        logger.error('publish: unknown error, marking dead', {
+          hash: next.hash.slice(0, 12),
+          error: err instanceof Error ? err.message : String(err),
+        });
+        ConfigRepo.markDead(next.hash);
+      }
     }
   } finally {
     publishing = false;

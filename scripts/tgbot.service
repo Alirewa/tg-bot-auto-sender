@@ -1,0 +1,34 @@
+[Unit]
+Description=tg-bot-auto-sender VPN aggregation bot
+Documentation=https://github.com/Alirewa/tg-bot-auto-sender
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__NODE_PATH__ dist/index.js
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+# Load environment from .env file
+EnvironmentFile=__INSTALL_DIR__/.env
+
+# Node.js tuning
+Environment=UV_THREADPOOL_SIZE=32
+Environment=NODE_ENV=production
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tg-bot-auto-sender
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

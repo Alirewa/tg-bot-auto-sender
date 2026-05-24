@@ -174,6 +174,108 @@ export const SettingsRepo = {
   },
 };
 
+// ----------------------- analytics -----------------------
+
+export interface AnalyticsCycle {
+  cycle_at: number;
+  total_scraped: number;
+  total_validated: number;
+  alive_count: number;
+  dead_count: number;
+  best_protocol: string | null;
+  best_country: string | null;
+  avg_latency_ms: number | null;
+  source_count: number;
+}
+
+export const AnalyticsRepo = {
+  insertCycle(data: AnalyticsCycle): void {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO analytics
+        (cycle_at, total_scraped, total_validated, alive_count, dead_count,
+         best_protocol, best_country, avg_latency_ms, source_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      data.cycle_at,
+      data.total_scraped,
+      data.total_validated,
+      data.alive_count,
+      data.dead_count,
+      data.best_protocol,
+      data.best_country,
+      data.avg_latency_ms,
+      data.source_count,
+    );
+  },
+
+  getLastN(n: number): AnalyticsCycle[] {
+    const db = getDb();
+    return db
+      .prepare('SELECT * FROM analytics ORDER BY cycle_at DESC LIMIT ?')
+      .all(n) as AnalyticsCycle[];
+  },
+
+  getSummaryLast24h(): {
+    cycles: number;
+    totalAlive: number;
+    totalValidated: number;
+    avgLatency: number | null;
+    bestProtocol: string | null;
+    bestCountry: string | null;
+  } {
+    const db = getDb();
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const rows = db
+      .prepare('SELECT * FROM analytics WHERE cycle_at >= ? ORDER BY cycle_at DESC')
+      .all(since) as AnalyticsCycle[];
+
+    if (rows.length === 0) {
+      return {
+        cycles: 0,
+        totalAlive: 0,
+        totalValidated: 0,
+        avgLatency: null,
+        bestProtocol: null,
+        bestCountry: null,
+      };
+    }
+
+    // Best protocol = most frequently appearing as best_protocol.
+    const protoCounts: Record<string, number> = {};
+    const countryCounts: Record<string, number> = {};
+    let totalAlive = 0;
+    let totalValidated = 0;
+    let latencySum = 0;
+    let latencyCount = 0;
+
+    for (const r of rows) {
+      totalAlive += r.alive_count;
+      totalValidated += r.total_validated;
+      if (r.best_protocol) protoCounts[r.best_protocol] = (protoCounts[r.best_protocol] ?? 0) + 1;
+      if (r.best_country) countryCounts[r.best_country] = (countryCounts[r.best_country] ?? 0) + 1;
+      if (r.avg_latency_ms !== null) {
+        latencySum += r.avg_latency_ms;
+        latencyCount++;
+      }
+    }
+
+    const bestProtocol =
+      Object.entries(protoCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const bestCountry =
+      Object.entries(countryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+    return {
+      cycles: rows.length,
+      totalAlive,
+      totalValidated,
+      avgLatency: latencyCount > 0 ? Math.round(latencySum / latencyCount) : null,
+      bestProtocol,
+      bestCountry,
+    };
+  },
+};
+
 // ----------------------- subscription links -----------------------
 
 export interface SubLink {
