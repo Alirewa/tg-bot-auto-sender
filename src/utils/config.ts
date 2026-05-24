@@ -45,14 +45,16 @@ const config: AppConfig = {
   adminUserId: asInt('ADMIN_USER_ID', required('ADMIN_USER_ID')),
   publishChannel,
   publishChannelHandle: publishChannel,
+  // Defaults tuned for Hetzner CX22 (2 vCPU / 4 GB RAM).
+  // Override in .env if you run on a bigger or smaller box.
   tcpTimeoutMs: asInt('TCP_TIMEOUT_MS', optional('TCP_TIMEOUT_MS', '2500')),
   validationConcurrency: asInt(
     'VALIDATION_CONCURRENCY',
-    optional('VALIDATION_CONCURRENCY', '500'),
+    optional('VALIDATION_CONCURRENCY', '300'),
   ),
   maxConfigsPerCycle: asInt(
     'MAX_CONFIGS_PER_CYCLE',
-    optional('MAX_CONFIGS_PER_CYCLE', '1500'),
+    optional('MAX_CONFIGS_PER_CYCLE', '1200'),
   ),
   publishCron: optional('PUBLISH_CRON', '* * * * *'),
   scrapeCron: optional('SCRAPE_CRON', '*/10 * * * *'),
