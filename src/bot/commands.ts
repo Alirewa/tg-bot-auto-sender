@@ -1,6 +1,7 @@
 import { Telegraf, Markup, Context } from 'telegraf';
 import { InlineKeyboardMarkup } from 'telegraf/typings/core/types/typegram';
 import config from '../utils/config';
+import { getPublishChannel } from './publisher';
 import logger from '../utils/logger';
 import {
   AnalyticsRepo,
@@ -19,7 +20,7 @@ import {
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
 
-type AwaitingKind = 'add_sub' | 'del_sub' | 'set_template' | 'toggle_sub';
+type AwaitingKind = 'add_sub' | 'del_sub' | 'set_template' | 'toggle_sub' | 'set_channel';
 const awaiting = new Map<number, AwaitingKind>();
 
 function formatUptime(ms: number): string {
@@ -48,11 +49,13 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const counter = SettingsRepo.getInt('post_counter', 0);
   const enabledSubs = SubsRepo.listEnabled().length;
   const totalSubs = SubsRepo.list().length;
+  const channel = getPublishChannel();
+  const channelDisplay = channel || '⚠️ Not set — use /setchannel';
 
   const text = [
     '<b>tg-bot-auto-sender — admin panel</b>',
     '',
-    `Channel:       <code>${config.publishChannel}</code>`,
+    `Channel:       <code>${channelDisplay}</code>`,
     `Auto-send:     <b>${autoSend ? 'ON 🟢' : 'OFF 🔴'}</b>`,
     `Post counter:  <b>${counter}</b>`,
     `Sub sources:   <b>${enabledSubs}/${totalSubs}</b> enabled`,
@@ -72,20 +75,23 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
       Markup.button.callback('🏓 Ping', 'act:ping'),
     ],
     [
-      Markup.button.callback('🔗 Sources', 'act:subs'),
+      Markup.button.callback('📢 Set Channel', 'act:set_channel'),
       Markup.button.callback('🧩 Template', 'act:template'),
     ],
     [
-      Markup.button.callback('⏳ Scrape now', 'act:scrape'),
+      Markup.button.callback('🔗 Sources', 'act:subs'),
       Markup.button.callback('♻️ Re-check queue', 'act:check'),
     ],
     [
-      Markup.button.callback('📡 Sub links', 'act:sublink'),
+      Markup.button.callback('⏳ Scrape now', 'act:scrape'),
       Markup.button.callback('📈 Analytics', 'act:analytics'),
     ],
     [
-      Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
+      Markup.button.callback('📡 Sub links', 'act:sublink'),
       Markup.button.callback('🔄 Refresh', 'act:menu'),
+    ],
+    [
+      Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
     ],
   ]).reply_markup;
 
@@ -435,6 +441,21 @@ export function registerCommands(bot: Telegraf): void {
     runCheckWithProgress(ctx, '<b>♻️ Re-checking queue</b>'),
   );
 
+  bot.command('setchannel', async (ctx) => {
+    const arg = stripCommand(ctx.message?.text ?? '').trim();
+    if (!arg) {
+      await ctx.reply(
+        'Usage: <code>/setchannel @yourchannel</code> or <code>/setchannel -1001234567890</code>',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    SettingsRepo.setString('publish_channel', arg);
+    await ctx.reply(`✅ Publish channel set to <code>${escapeHtml(arg)}</code>.\n\nMake sure the bot is an admin with "Post Messages" permission.`, {
+      parse_mode: 'HTML',
+    });
+  });
+
   bot.command('sublink', async (ctx) => {
     await ctx.reply(sublinkText(), {
       parse_mode: 'HTML',
@@ -590,6 +611,15 @@ export function registerCommands(bot: Telegraf): void {
           });
           return;
 
+        case 'set_channel':
+          awaiting.set(userId, 'set_channel');
+          await ctx.answerCbQuery();
+          await ctx.reply(
+            'Send the channel username or ID to publish to.\n\nExamples:\n<code>@mychannel</code>\n<code>-1001234567890</code>\n\n/cancel to abort',
+            { parse_mode: 'HTML' },
+          );
+          return;
+
         default:
           await ctx.answerCbQuery();
       }
@@ -675,6 +705,24 @@ export function registerCommands(bot: Telegraf): void {
       });
       const v = templateMenu();
       await ctx.reply(v.text, { parse_mode: 'HTML', reply_markup: v.keyboard });
+      return;
+    }
+
+    if (kind === 'set_channel') {
+      const ch = text.trim();
+      if (!ch.startsWith('@') && !ch.startsWith('-')) {
+        await ctx.reply(
+          '❌ Channel must start with <code>@</code> (username) or <code>-</code> (numeric ID).\n\nTry again or /cancel.',
+          { parse_mode: 'HTML' },
+        );
+        return;
+      }
+      SettingsRepo.setString('publish_channel', ch);
+      await ctx.reply(
+        `✅ Publish channel set to <code>${escapeHtml(ch)}</code>.\n\nMake sure the bot is an admin with "Post Messages" permission.`,
+        { parse_mode: 'HTML' },
+      );
+      await showMain(ctx);
       return;
     }
   });

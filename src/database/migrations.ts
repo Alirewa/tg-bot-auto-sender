@@ -76,6 +76,8 @@ export function runMigrations(db: DB): void {
   seed.run('auto_send', '1');
   seed.run('template', DEFAULT_TEMPLATE);
   seed.run('post_counter', '0');
+  // publish_channel can be set from .env or via /setchannel bot command.
+  seed.run('publish_channel', process.env['PUBLISH_CHANNEL']?.trim() ?? '');
 
   const subCount = (
     db.prepare('SELECT COUNT(*) AS c FROM sub_links').get() as { c: number }

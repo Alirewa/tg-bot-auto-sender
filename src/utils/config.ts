@@ -55,8 +55,6 @@ export interface AppConfig {
   githubPushIntervalMs: number;
 }
 
-const publishChannel = required('PUBLISH_CHANNEL');
-
 // Auto-tune from hardware; explicit .env values always override.
 const tuned = autoTune({
   validationConcurrency: optionalInt('VALIDATION_CONCURRENCY'),
@@ -67,8 +65,9 @@ const tuned = autoTune({
 const config: AppConfig = {
   botToken: required('BOT_TOKEN'),
   adminUserId: asInt('ADMIN_USER_ID', required('ADMIN_USER_ID')),
-  publishChannel,
-  publishChannelHandle: publishChannel,
+  // Optional: can be set later via /setchannel command inside the bot.
+  publishChannel: optional('PUBLISH_CHANNEL', ''),
+  publishChannelHandle: optional('PUBLISH_CHANNEL', ''),
   // Hardware-aware defaults (overridable via .env)
   tcpTimeoutMs: tuned.tcpTimeoutMs,
   validationConcurrency: tuned.validationConcurrency,
