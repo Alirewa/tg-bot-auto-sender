@@ -15,6 +15,10 @@ let publishTask: ScheduledTask | null = null;
 let scrapeTask: ScheduledTask | null = null;
 let scraping = false;
 let publishing = false;
+// Throttle the "auto_send is OFF" warning to once per 5 minutes so it
+// appears in logs at warn level without flooding them.
+let lastAutoSendWarnMs = 0;
+const AUTO_SEND_WARN_INTERVAL_MS = 5 * 60 * 1000;
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -202,7 +206,13 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
 async function publishTick(bot: Telegraf): Promise<void> {
   if (publishing) return;
   if (!SettingsRepo.getBool('auto_send', true)) {
-    logger.debug('publish: skipped — auto_send is OFF');
+    const now = Date.now();
+    if (now - lastAutoSendWarnMs > AUTO_SEND_WARN_INTERVAL_MS) {
+      logger.warn('publish: auto_send is OFF — send /on to the bot to re-enable', {
+        queueSize: queue.size(),
+      });
+      lastAutoSendWarnMs = now;
+    }
     return;
   }
 
@@ -219,6 +229,12 @@ async function publishTick(bot: Telegraf): Promise<void> {
 
     const next = queue.dequeue();
     if (!next) return;
+
+    logger.info('publish: sending', {
+      hash: next.hash.slice(0, 12),
+      protocol: next.protocol,
+      country: next.country,
+    });
 
     try {
       await publishConfig(bot, next);

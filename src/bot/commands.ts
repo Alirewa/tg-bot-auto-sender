@@ -252,6 +252,27 @@ function logsText(publishOnly = false): string {
     : readRecentLogs(20);
 
   if (entries.length === 0) {
+    if (publishOnly) {
+      const autoSend = SettingsRepo.getBool('auto_send', true);
+      const qSize = queue.size();
+      const channel = getPublishChannel();
+      return [
+        '<b>📋 Publish Logs</b>',
+        '',
+        '⚠️ No publish events found in recent logs.',
+        '',
+        `Auto-send : ${autoSend ? '🟢 ON' : '🔴 OFF'}`,
+        `Queue     : <b>${qSize}</b> configs`,
+        `Channel   : <code>${channel || '⚠️ not set'}</code>`,
+        '',
+        ...(autoSend ? [] : ['➡️ Send /on to enable auto-send']),
+        ...(!channel ? ['➡️ Send /setchannel @yourchannel'] : []),
+        ...(qSize === 0 ? ['➡️ Send /forcescrape to fill the queue'] : []),
+        ...(autoSend && channel && qSize > 0
+          ? ['ℹ️ Everything looks configured. Update bot and check again in 1 minute.']
+          : []),
+      ].join('\n');
+    }
     return (
       '<b>📋 Recent Logs</b>\n\n' +
       'No logs found yet.\n' +
@@ -745,10 +766,15 @@ export function registerCommands(bot: Telegraf): void {
           await ctx.answerCbQuery();
       }
     } catch (err) {
-      logger.error('callback handler error', {
-        action,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Telegram throws 400 "message is not modified" when we try to edit
+      // a message to the exact same content (e.g. clicking Logs twice).
+      // Treat it as a no-op rather than an error.
+      if (errMsg.includes('message is not modified')) {
+        await ctx.answerCbQuery().catch(() => {});
+        return;
+      }
+      logger.error('callback handler error', { action, error: errMsg });
       try {
         await ctx.answerCbQuery('Error');
       } catch {
