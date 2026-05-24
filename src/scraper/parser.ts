@@ -1,5 +1,4 @@
 import * as crypto from 'crypto';
-import { URL } from 'url';
 import { ParsedConfig, Protocol } from '../types';
 import logger from '../utils/logger';
 
@@ -23,34 +22,30 @@ function b64decode(s: string): string {
 
 function looksBase64(s: string): boolean {
   if (s.length < 24) return false;
-  // Permit standard + URL-safe alphabets and padding.
   return /^[A-Za-z0-9+/_\-=\s]+$/.test(s);
 }
 
 /**
- * Many subscription endpoints return EITHER:
- *  - plain text with one config URI per line, OR
- *  - a single base64 blob that decodes into the plain-text form above.
- *
- * Some return the blob with embedded newlines. We unify all these into one
- * plain-text body before regex extraction.
+ * Some sources serve a single base64 blob that decodes into plain-text URIs.
+ * Detect and unwrap that wrapper; otherwise return text as-is.
  */
 function unwrapBase64(text: string): string {
   const stripped = text.replace(/\s+/g, '');
   if (!looksBase64(stripped)) return text;
   try {
     const decoded = b64decode(stripped);
-    if (PROTOCOL_DETECT_RE.test(decoded)) {
-      return decoded;
-    }
+    if (PROTOCOL_DETECT_RE.test(decoded)) return decoded;
   } catch {
     /* ignore */
   }
   return text;
 }
 
+/**
+ * Some files mix protocol lines with single-line base64 blobs. Decode lines that
+ * look base64 AND decode into protocol URIs; pass everything else through.
+ */
 function decodePerLine(text: string): string {
-  // Some sources mix protocol lines with base64-only lines. Decode the base64-only lines.
   const out: string[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -70,11 +65,12 @@ function decodePerLine(text: string): string {
         /* ignore */
       }
     }
-    // keep as-is so the global regex can still try (cheap).
     out.push(line);
   }
   return out.join('\n');
 }
+
+// --------------------- per-protocol host/port extraction ---------------------
 
 function parseVmess(raw: string): { host: string; port: number } | null {
   try {
@@ -92,19 +88,60 @@ function parseVmess(raw: string): { host: string; port: number } | null {
   }
 }
 
-function parseStandardUrl(raw: string): { host: string; port: number } | null {
-  try {
-    const u = new URL(raw);
-    const host = u.hostname;
-    const port = Number(u.port);
-    if (!host || !Number.isFinite(port) || port <= 0 || port > 65535) return null;
-    return { host, port };
-  } catch {
-    return null;
+/**
+ * Manual extractor for vless:// and trojan:// URIs.
+ *
+ * Why not `new URL(raw)`? Node's WHATWG URL parser treats `vless`/`trojan` as
+ * non-special schemes, which means `.hostname` and `.port` come back empty —
+ * so EVERY config silently fails to parse. We extract them with a regex
+ * instead, which also tolerates IPv6 hosts inside `[brackets]`.
+ *
+ *   vless://<userinfo>@<host>:<port>[?query][#fragment]
+ */
+function parseUserinfoUrl(raw: string, scheme: string): { host: string; port: number } | null {
+  const prefix = `${scheme}://`;
+  if (!raw.toLowerCase().startsWith(prefix)) return null;
+  const body = raw.slice(prefix.length);
+
+  const atIdx = body.indexOf('@');
+  if (atIdx < 0) return null;
+
+  let rest = body.slice(atIdx + 1);
+  // Strip query and fragment.
+  const cut = rest.search(/[?#]/);
+  if (cut >= 0) rest = rest.slice(0, cut);
+
+  let host: string;
+  let portStr: string;
+
+  if (rest.startsWith('[')) {
+    // IPv6: [::1]:443
+    const end = rest.indexOf(']');
+    if (end < 0) return null;
+    host = rest.slice(1, end);
+    const after = rest.slice(end + 1);
+    if (!after.startsWith(':')) return null;
+    portStr = after.slice(1);
+  } else {
+    const colon = rest.lastIndexOf(':');
+    if (colon < 0) return null;
+    host = rest.slice(0, colon);
+    portStr = rest.slice(colon + 1);
+    // Strip any trailing path separator the regex might have included.
+    const slash = portStr.indexOf('/');
+    if (slash >= 0) portStr = portStr.slice(0, slash);
   }
+
+  host = host.trim();
+  const port = Number.parseInt(portStr, 10);
+  if (!host || !Number.isFinite(port) || port <= 0 || port > 65535) return null;
+  return { host, port };
 }
 
 function parseSs(raw: string): { host: string; port: number } | null {
+  // ss URIs come in two shapes:
+  //   1) ss://base64(method:password)@host:port[?plugin=...][#name]
+  //   2) ss://base64(method:password@host:port)[#name]
   try {
     const payload = raw.slice('ss://'.length);
     const hashIdx = payload.indexOf('#');
@@ -112,9 +149,25 @@ function parseSs(raw: string): { host: string; port: number } | null {
 
     const atIdx = body.indexOf('@');
     if (atIdx >= 0) {
-      const hostPart = body.slice(atIdx + 1).split('?')[0];
-      const [host, portStr] = hostPart.split(':');
-      const port = Number(portStr);
+      let hostPart = body.slice(atIdx + 1);
+      const cut = hostPart.search(/[?/]/);
+      if (cut >= 0) hostPart = hostPart.slice(0, cut);
+      let host: string;
+      let portStr: string;
+      if (hostPart.startsWith('[')) {
+        const end = hostPart.indexOf(']');
+        if (end < 0) return null;
+        host = hostPart.slice(1, end);
+        const after = hostPart.slice(end + 1);
+        if (!after.startsWith(':')) return null;
+        portStr = after.slice(1);
+      } else {
+        const colon = hostPart.lastIndexOf(':');
+        if (colon < 0) return null;
+        host = hostPart.slice(0, colon);
+        portStr = hostPart.slice(colon + 1);
+      }
+      const port = Number.parseInt(portStr, 10);
       if (host && Number.isFinite(port) && port > 0 && port <= 65535) {
         return { host, port };
       }
@@ -125,8 +178,10 @@ function parseSs(raw: string): { host: string; port: number } | null {
     const at = decoded.lastIndexOf('@');
     if (at < 0) return null;
     const hp = decoded.slice(at + 1);
-    const [host, portStr] = hp.split(':');
-    const port = Number(portStr);
+    const colon = hp.lastIndexOf(':');
+    if (colon < 0) return null;
+    const host = hp.slice(0, colon);
+    const port = Number.parseInt(hp.slice(colon + 1), 10);
     if (!host || !Number.isFinite(port) || port <= 0 || port > 65535) return null;
     return { host, port };
   } catch {
@@ -142,8 +197,9 @@ function extractHostPort(
     case 'vmess':
       return parseVmess(raw);
     case 'vless':
+      return parseUserinfoUrl(raw, 'vless');
     case 'trojan':
-      return parseStandardUrl(raw);
+      return parseUserinfoUrl(raw, 'trojan');
     case 'ss':
       return parseSs(raw);
     default:
@@ -161,19 +217,15 @@ function detectProtocol(raw: string): Protocol | null {
 }
 
 export function parseConfigsFromText(text: string): ParsedConfig[] {
-  // Step 1: if the whole body is one big base64 blob, decode it.
+  // Stage 1: unwrap a whole-body base64 blob (some sources do this).
   let body = unwrapBase64(text);
-  // Step 2: if some lines are individually base64-encoded, decode those.
-  if (!PROTOCOL_DETECT_RE.test(body) || body === text) {
-    body = decodePerLine(body);
-  } else {
-    // Still run per-line in case the decoded blob itself contains base64 lines.
-    body = decodePerLine(body);
-  }
+  // Stage 2: also decode per-line in case some lines are individually base64.
+  body = decodePerLine(body);
 
   const matches = body.match(PROTOCOL_RE) ?? [];
   const out: ParsedConfig[] = [];
   const seen = new Set<string>();
+  let dropped = 0;
 
   for (const m of matches) {
     const raw = normalize(m);
@@ -181,11 +233,17 @@ export function parseConfigsFromText(text: string): ParsedConfig[] {
     seen.add(raw);
 
     const protocol = detectProtocol(raw);
-    if (!protocol) continue;
+    if (!protocol) {
+      dropped++;
+      continue;
+    }
 
     try {
       const hp = extractHostPort(protocol, raw);
-      if (!hp) continue;
+      if (!hp) {
+        dropped++;
+        continue;
+      }
       out.push({
         hash: sha256(raw),
         raw,
@@ -194,11 +252,22 @@ export function parseConfigsFromText(text: string): ParsedConfig[] {
         port: hp.port,
       });
     } catch (err) {
+      dropped++;
       logger.debug('parser error', {
         protocol,
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  if (matches.length > 0 && out.length === 0) {
+    logger.warn('parser: regex matched URIs but extraction yielded zero', {
+      matched: matches.length,
+      dropped,
+      sample: matches[0]?.slice(0, 120),
+    });
+  } else if (dropped > 0) {
+    logger.info('parser: dropped malformed URIs', { kept: out.length, dropped });
   }
 
   return out;
