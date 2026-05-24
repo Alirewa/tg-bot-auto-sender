@@ -4,6 +4,7 @@ import { ParsedConfig, Protocol } from '../types';
 import logger from '../utils/logger';
 
 const PROTOCOL_RE = /(vmess:\/\/[^\s]+|vless:\/\/[^\s]+|trojan:\/\/[^\s]+|ss:\/\/[^\s]+)/gi;
+const PROTOCOL_DETECT_RE = /(vmess|vless|trojan|ss):\/\//i;
 
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
@@ -14,17 +15,70 @@ function normalize(raw: string): string {
 }
 
 function b64decode(s: string): string {
-  // Handle URL-safe base64 and missing padding.
   const cleaned = s.replace(/-/g, '+').replace(/_/g, '/');
   const pad = cleaned.length % 4;
   const padded = pad ? cleaned + '='.repeat(4 - pad) : cleaned;
   return Buffer.from(padded, 'base64').toString('utf-8');
 }
 
+function looksBase64(s: string): boolean {
+  if (s.length < 24) return false;
+  // Permit standard + URL-safe alphabets and padding.
+  return /^[A-Za-z0-9+/_\-=\s]+$/.test(s);
+}
+
+/**
+ * Many subscription endpoints return EITHER:
+ *  - plain text with one config URI per line, OR
+ *  - a single base64 blob that decodes into the plain-text form above.
+ *
+ * Some return the blob with embedded newlines. We unify all these into one
+ * plain-text body before regex extraction.
+ */
+function unwrapBase64(text: string): string {
+  const stripped = text.replace(/\s+/g, '');
+  if (!looksBase64(stripped)) return text;
+  try {
+    const decoded = b64decode(stripped);
+    if (PROTOCOL_DETECT_RE.test(decoded)) {
+      return decoded;
+    }
+  } catch {
+    /* ignore */
+  }
+  return text;
+}
+
+function decodePerLine(text: string): string {
+  // Some sources mix protocol lines with base64-only lines. Decode the base64-only lines.
+  const out: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (PROTOCOL_DETECT_RE.test(line)) {
+      out.push(line);
+      continue;
+    }
+    if (looksBase64(line)) {
+      try {
+        const decoded = b64decode(line);
+        if (PROTOCOL_DETECT_RE.test(decoded)) {
+          out.push(decoded);
+          continue;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    // keep as-is so the global regex can still try (cheap).
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 function parseVmess(raw: string): { host: string; port: number } | null {
   try {
     const payload = raw.slice('vmess://'.length);
-    // vmess payload may have a fragment we should strip first.
     const hashIdx = payload.indexOf('#');
     const body = hashIdx >= 0 ? payload.slice(0, hashIdx) : payload;
     const decoded = b64decode(body);
@@ -51,9 +105,6 @@ function parseStandardUrl(raw: string): { host: string; port: number } | null {
 }
 
 function parseSs(raw: string): { host: string; port: number } | null {
-  // Two valid forms:
-  // 1) ss://base64(method:password)@host:port[?plugin=...][#name]
-  // 2) ss://base64(method:password@host:port)[#name]
   try {
     const payload = raw.slice('ss://'.length);
     const hashIdx = payload.indexOf('#');
@@ -61,7 +112,6 @@ function parseSs(raw: string): { host: string; port: number } | null {
 
     const atIdx = body.indexOf('@');
     if (atIdx >= 0) {
-      // Form (1): plain host:port part after @
       const hostPart = body.slice(atIdx + 1).split('?')[0];
       const [host, portStr] = hostPart.split(':');
       const port = Number(portStr);
@@ -71,7 +121,6 @@ function parseSs(raw: string): { host: string; port: number } | null {
       return null;
     }
 
-    // Form (2): whole body is base64
     const decoded = b64decode(body);
     const at = decoded.lastIndexOf('@');
     if (at < 0) return null;
@@ -112,7 +161,17 @@ function detectProtocol(raw: string): Protocol | null {
 }
 
 export function parseConfigsFromText(text: string): ParsedConfig[] {
-  const matches = text.match(PROTOCOL_RE) ?? [];
+  // Step 1: if the whole body is one big base64 blob, decode it.
+  let body = unwrapBase64(text);
+  // Step 2: if some lines are individually base64-encoded, decode those.
+  if (!PROTOCOL_DETECT_RE.test(body) || body === text) {
+    body = decodePerLine(body);
+  } else {
+    // Still run per-line in case the decoded blob itself contains base64 lines.
+    body = decodePerLine(body);
+  }
+
+  const matches = body.match(PROTOCOL_RE) ?? [];
   const out: ParsedConfig[] = [];
   const seen = new Set<string>();
 

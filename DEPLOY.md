@@ -109,6 +109,35 @@ pm2 startup systemd -u $USER --hp $HOME
 🇩🇪 - #1 @webdw
 ```
 
+## ۱۰.۵) نصب دستور `tgpanel`
+
+یک کنترل‌پنل تعاملی برای آپدیت / restart / حذف / ویرایش env و backup:
+
+```bash
+sudo bash /opt/tg-bot-auto-sender/scripts/install-tgpanel.sh
+```
+
+از این به بعد در هر مسیر فقط کافیست بنویسی:
+
+```bash
+tgpanel
+```
+
+منوی tgpanel شامل:
+
+| گزینه | کار |
+|---|---|
+| 1 | وضعیت ربات و آخرین commit |
+| 2 | لاگ زنده |
+| 3 / 4 / 5 | Restart / Start / Stop |
+| 6 | آپدیت از GitHub (pull + build + restart) |
+| 7 | ویرایش `.env` |
+| 8 | Backup دیتابیس |
+| 9 | `pm2 save` |
+| 10 | Shell در پوشه پروژه |
+| 11 | نصب از صفر (clone) |
+| 12 | حذف کامل از سرور |
+
 ## ۱۱) مانیتورینگ
 
 ```bash

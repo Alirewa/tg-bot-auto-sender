@@ -86,6 +86,17 @@ src/
   index.ts
 ```
 
+## 🛠 ابزار `tgpanel`
+
+روی سرور Ubuntu بعد از clone می‌توانی این دستور را نصب کنی:
+
+```bash
+sudo bash scripts/install-tgpanel.sh
+```
+
+سپس با `tgpanel` یک منوی متنی باز می‌شود که شامل:
+update / restart / start / stop / edit env / backup / logs / uninstall.
+
 ## اجرای لوکال
 ```bash
 cp .env.example .env
