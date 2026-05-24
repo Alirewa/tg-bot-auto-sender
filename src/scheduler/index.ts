@@ -201,7 +201,10 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
 
 async function publishTick(bot: Telegraf): Promise<void> {
   if (publishing) return;
-  if (!SettingsRepo.getBool('auto_send', true)) return;
+  if (!SettingsRepo.getBool('auto_send', true)) {
+    logger.debug('publish: skipped — auto_send is OFF');
+    return;
+  }
 
   publishing = true;
   try {
