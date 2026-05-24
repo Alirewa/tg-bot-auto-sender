@@ -5,38 +5,73 @@ import { resolveCountry } from '../geoip';
 import config from '../utils/config';
 import logger from '../utils/logger';
 
-export async function validateBatch(configs: ParsedConfig[]): Promise<ValidatedConfig[]> {
+export interface ValidateProgress {
+  total: number;
+  done: number;
+  alive: number;
+  dead: number;
+}
+
+export type ProgressCallback = (p: ValidateProgress) => void;
+
+export interface StreamCallbacks {
+  onAlive?: (c: ValidatedConfig) => void;
+  onProgress?: ProgressCallback;
+}
+
+/**
+ * Run TCP probes concurrently and stream each alive config the moment it
+ * passes (rather than waiting for the whole batch). This lets the scheduler
+ * start publishing within seconds, even on a 1500-config cycle.
+ */
+export async function validateStreaming(
+  configs: ParsedConfig[],
+  cb: StreamCallbacks = {},
+): Promise<ValidatedConfig[]> {
   if (configs.length === 0) return [];
 
   const limit = pLimit(config.validationConcurrency);
+  const alive: ValidatedConfig[] = [];
+  let done = 0;
+  let aliveCount = 0;
+  let deadCount = 0;
+
   logger.info('validate: starting', {
     total: configs.length,
     concurrency: config.validationConcurrency,
+    timeoutMs: config.tcpTimeoutMs,
   });
 
   const tasks = configs.map((c) =>
-    limit(async (): Promise<ValidatedConfig | null> => {
+    limit(async () => {
       const probe = await tcpProbe(c.host, c.port, config.tcpTimeoutMs);
-      if (!probe.alive) return null;
-      const geo = await resolveCountry(c.host);
-      return {
-        ...c,
-        latencyMs: probe.latencyMs,
-        country: geo.countryCode,
-        flag: geo.flag,
-      };
+      done++;
+      if (!probe.alive) {
+        deadCount++;
+      } else {
+        const geo = await resolveCountry(c.host);
+        const v: ValidatedConfig = {
+          ...c,
+          latencyMs: probe.latencyMs,
+          country: geo.countryCode,
+          flag: geo.flag,
+        };
+        alive.push(v);
+        aliveCount++;
+        cb.onAlive?.(v);
+      }
+      cb.onProgress?.({ total: configs.length, done, alive: aliveCount, dead: deadCount });
     }),
   );
 
-  const results = await Promise.all(tasks);
-  const alive = results.filter((r): r is ValidatedConfig => r !== null);
-  // Health score: prefer lower latency.
+  await Promise.all(tasks);
   alive.sort((a, b) => a.latencyMs - b.latencyMs);
 
-  logger.info('validate: done', {
-    alive: alive.length,
-    dead: configs.length - alive.length,
-  });
-
+  logger.info('validate: done', { total: configs.length, alive: alive.length });
   return alive;
+}
+
+// Legacy batch API retained for callers that don't need streaming.
+export async function validateBatch(configs: ParsedConfig[]): Promise<ValidatedConfig[]> {
+  return validateStreaming(configs);
 }

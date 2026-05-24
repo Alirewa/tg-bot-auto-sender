@@ -28,9 +28,10 @@ export interface AppConfig {
   botToken: string;
   adminUserId: number;
   publishChannel: string;
-  publishChannelHandle: string; // @webdw style, used in template {channel}
+  publishChannelHandle: string;
   tcpTimeoutMs: number;
   validationConcurrency: number;
+  maxConfigsPerCycle: number;
   publishCron: string;
   scrapeCron: string;
   dbPath: string;
@@ -38,19 +39,20 @@ export interface AppConfig {
 }
 
 const publishChannel = required('PUBLISH_CHANNEL');
-const publishChannelHandle = publishChannel.startsWith('@')
-  ? publishChannel
-  : publishChannel; // keep as-is for numeric IDs
 
 const config: AppConfig = {
   botToken: required('BOT_TOKEN'),
   adminUserId: asInt('ADMIN_USER_ID', required('ADMIN_USER_ID')),
   publishChannel,
-  publishChannelHandle,
-  tcpTimeoutMs: asInt('TCP_TIMEOUT_MS', optional('TCP_TIMEOUT_MS', '5000')),
+  publishChannelHandle: publishChannel,
+  tcpTimeoutMs: asInt('TCP_TIMEOUT_MS', optional('TCP_TIMEOUT_MS', '2500')),
   validationConcurrency: asInt(
     'VALIDATION_CONCURRENCY',
-    optional('VALIDATION_CONCURRENCY', '20'),
+    optional('VALIDATION_CONCURRENCY', '500'),
+  ),
+  maxConfigsPerCycle: asInt(
+    'MAX_CONFIGS_PER_CYCLE',
+    optional('MAX_CONFIGS_PER_CYCLE', '1500'),
   ),
   publishCron: optional('PUBLISH_CRON', '* * * * *'),
   scrapeCron: optional('SCRAPE_CRON', '*/10 * * * *'),

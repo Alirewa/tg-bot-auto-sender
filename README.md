@@ -62,8 +62,9 @@
 | `BOT_TOKEN` | ✅ | توکن از `@BotFather` |
 | `ADMIN_USER_ID` | ✅ | آی‌دی عددی تنها ادمین |
 | `PUBLISH_CHANNEL` | ✅ | مثل `@webdw` (ربات باید ادمین کانال باشد) |
-| `TCP_TIMEOUT_MS` | ❌ | پیش‌فرض `5000` |
-| `VALIDATION_CONCURRENCY` | ❌ | پیش‌فرض `20` |
+| `TCP_TIMEOUT_MS` | ❌ | پیش‌فرض `2500` — کمتر = اسکرپ سریع‌تر، false-negative بیشتر |
+| `VALIDATION_CONCURRENCY` | ❌ | پیش‌فرض `500` — تعداد probe موازی |
+| `MAX_CONFIGS_PER_CYCLE` | ❌ | پیش‌فرض `1500` — sample تصادفی برای جلوگیری از قفل شدن چرخه روی منابع ۵۰هزار‌تایی |
 | `PUBLISH_CRON` | ❌ | پیش‌فرض `* * * * *` |
 | `SCRAPE_CRON` | ❌ | پیش‌فرض `*/10 * * * *` |
 | `DB_PATH` | ❌ | پیش‌فرض `./data/bot.sqlite` |
