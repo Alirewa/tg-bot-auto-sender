@@ -217,6 +217,10 @@ async function publishTick(bot: Telegraf): Promise<void> {
   }
 
   publishing = true;
+  logger.info('publish: tick — attempting', {
+    queueSize: queue.size(),
+    channel: SettingsRepo.getString('publish_channel', ''),
+  });
   try {
     if (queue.size() === 0) {
       logger.info('publish: queue empty, triggering scrape');
