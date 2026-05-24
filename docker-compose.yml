@@ -1,0 +1,16 @@
+services:
+  bot:
+    build: .
+    image: tg-bot-auto-sender:latest
+    container_name: tg-bot-auto-sender
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
