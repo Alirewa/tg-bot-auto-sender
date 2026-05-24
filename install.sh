@@ -13,19 +13,24 @@ SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 MIN_NODE_VERSION=20
 
 # ---------- colours ----------
-if [ -t 1 ]; then
-  RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-  CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+# Use printf to produce real escape bytes (single-quoted \033 is a literal string in bash).
+if [ -t 1 ] || [ -t 2 ]; then
+  RED="$(printf '\033[0;31m')"
+  GREEN="$(printf '\033[0;32m')"
+  YELLOW="$(printf '\033[1;33m')"
+  CYAN="$(printf '\033[0;36m')"
+  BOLD="$(printf '\033[1m')"
+  RESET="$(printf '\033[0m')"
 else
   RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; RESET=''
 fi
 
-info()  { echo -e "${CYAN}[INFO]${RESET}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${RESET}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
-die()   { echo -e "${RED}[ERROR]${RESET} $*" >&2; exit 1; }
+info()  { printf '%s\n' "${CYAN}[INFO]${RESET}  $*"; }
+ok()    { printf '%s\n' "${GREEN}[OK]${RESET}    $*"; }
+warn()  { printf '%s\n' "${YELLOW}[WARN]${RESET}  $*"; }
+die()   { printf '%s\n' "${RED}[ERROR]${RESET} $*" >&2; exit 1; }
 
-# Redirect all output to /dev/tty so colours appear even when piped.
+# Redirect all output to /dev/tty so colours appear even when piped from curl.
 exec >/dev/tty 2>&1
 ask()   {
   # ask VAR_NAME "Prompt text" "default"
@@ -99,9 +104,9 @@ setup_env() {
   local example="$INSTALL_DIR/.env.example"
 
   echo
-  echo -e "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
-  echo -e "${BOLD}         Setup Wizard — Enter Values         ${RESET}"
-  echo -e "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
+  printf '%s\n' "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
+  printf '%s\n' "${BOLD}         Setup Wizard — Enter Values         ${RESET}"
+  printf '%s\n' "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
   echo
 
   ask BOT_TOKEN      "Telegram Bot Token (from @BotFather)"   ""
@@ -110,7 +115,7 @@ setup_env() {
   ask SCRAPE_CRON    "Scrape interval (cron)"                 "*/10 * * * *"
   ask PUBLISH_CRON   "Publish interval (cron)"                "* * * * *"
   echo
-  info "GitHub auto-publishing (press Enter to skip):"
+  printf '%s\n' "${CYAN}GitHub auto-publishing (press Enter to skip):${RESET}"
   ask GITHUB_TOKEN   "GitHub Token (leave blank to skip)"     ""
   ask GITHUB_REPO    "GitHub Repo (e.g. user/v2ray-subs)"    ""
   ask LOG_LEVEL      "Log level (error|warn|info|debug)"      "info"
@@ -219,24 +224,24 @@ EOF
 # ---------- finish ----------
 print_summary() {
   echo
-  echo -e "${BOLD}${GREEN}══════════════════════════════════════════${RESET}"
-  echo -e "${BOLD}${GREEN}   ✅  Installation complete!              ${RESET}"
-  echo -e "${BOLD}${GREEN}══════════════════════════════════════════${RESET}"
+  printf '%s\n' "${BOLD}${GREEN}══════════════════════════════════════════${RESET}"
+  printf '%s\n' "${BOLD}${GREEN}   ✅  Installation complete!              ${RESET}"
+  printf '%s\n' "${BOLD}${GREEN}══════════════════════════════════════════${RESET}"
   echo
-  echo -e "  ${BOLD}Status:${RESET}  sudo systemctl status ${APP_NAME}"
-  echo -e "  ${BOLD}Logs:${RESET}    journalctl -u ${APP_NAME} -f"
-  echo -e "  ${BOLD}Restart:${RESET} sudo systemctl restart ${APP_NAME}"
-  echo -e "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
-  echo -e "  ${BOLD}Panel:${RESET}   tgpanel   (if install-tgpanel.sh was run)"
+  printf '%s\n' "  ${BOLD}Status:${RESET}  sudo systemctl status ${APP_NAME}"
+  printf '%s\n' "  ${BOLD}Logs:${RESET}    journalctl -u ${APP_NAME} -f"
+  printf '%s\n' "  ${BOLD}Restart:${RESET} sudo systemctl restart ${APP_NAME}"
+  printf '%s\n' "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
+  printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel   (if install-tgpanel.sh was run)"
   echo
-  echo -e "  The bot will post the first config within ~1 minute."
+  printf '%s\n' "  The bot will post the first config within ~1 minute."
   echo
 }
 
 # ---------- main ----------
 main() {
   echo
-  echo -e "${BOLD}${CYAN}tg-bot-auto-sender — Installer${RESET}"
+  printf '%s\n' "${BOLD}${CYAN}tg-bot-auto-sender — Installer${RESET}"
   echo
 
   check_os
