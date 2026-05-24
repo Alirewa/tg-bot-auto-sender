@@ -63,8 +63,28 @@
 | `ADMIN_USER_ID` | ✅ | آی‌دی عددی تنها ادمین |
 | `PUBLISH_CHANNEL` | ✅ | مثل `@webdw` (ربات باید ادمین کانال باشد) |
 | `TCP_TIMEOUT_MS` | ❌ | پیش‌فرض `2500` — کمتر = اسکرپ سریع‌تر، false-negative بیشتر |
-| `VALIDATION_CONCURRENCY` | ❌ | پیش‌فرض `500` — تعداد probe موازی |
-| `MAX_CONFIGS_PER_CYCLE` | ❌ | پیش‌فرض `1500` — sample تصادفی برای جلوگیری از قفل شدن چرخه روی منابع ۵۰هزار‌تایی |
+| `VALIDATION_CONCURRENCY` | ❌ | پیش‌فرض `300` (مناسب Hetzner CX22) — برای سرور قوی‌تر ۵۰۰-۸۰۰ |
+| `MAX_CONFIGS_PER_CYCLE` | ❌ | پیش‌فرض `1200` — sample تصادفی برای جلوگیری از قفل شدن چرخه |
+
+## 🖥 تنظیمات پیشنهادی بر اساس سرور
+
+| سرور | `VALIDATION_CONCURRENCY` | `MAX_CONFIGS_PER_CYCLE` |
+|---|---|---|
+| Hetzner CX11 (1 vCPU / 2 GB) | 150 | 600 |
+| **Hetzner CX22 (2 vCPU / 4 GB)** ← پیش‌فرض | **300** | **1200** |
+| Hetzner CX32 (4 vCPU / 8 GB) | 600 | 2500 |
+| CPX/AX series (8+ vCPU) | 1000+ | 5000 |
+
+روی CX22 با concurrency=300 یک چرخه‌ی ۱۲۰۰ تایی معمولاً **۱۰-۲۰ ثانیه** طول می‌کشد.
+
+### اگر TCP probe خطای `EMFILE` گرفت
+
+به این معنی است که ulimit پایین است. در سرور:
+```bash
+echo '* soft nofile 65535' | sudo tee -a /etc/security/limits.conf
+echo '* hard nofile 65535' | sudo tee -a /etc/security/limits.conf
+# سپس logout و دوباره login، یا reboot
+```
 | `PUBLISH_CRON` | ❌ | پیش‌فرض `* * * * *` |
 | `SCRAPE_CRON` | ❌ | پیش‌فرض `*/10 * * * *` |
 | `DB_PATH` | ❌ | پیش‌فرض `./data/bot.sqlite` |

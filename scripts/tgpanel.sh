@@ -114,14 +114,17 @@ action_start() {
 
 action_update() {
   need_dir
-  note "git pull..."
-  run_in_project git pull --rebase || die "git pull failed"
+  note "git fetch + reset --hard origin/main..."
+  run_in_project git fetch --all || die "git fetch failed"
+  run_in_project git reset --hard origin/main || die "git reset failed"
+  note "Clearing old build (dist/)..."
+  rm -rf "$PROJECT_DIR/dist"
   note "npm ci..."
   run_in_project npm ci --no-audit --no-fund || die "npm ci failed"
   note "npm run build..."
   run_in_project npm run build || die "build failed"
   if pm2_running; then
-    pm2 restart "$APP_NAME"
+    pm2 restart "$APP_NAME" --update-env
     ok "Update complete and bot restarted."
   else
     warn "Bot was not running; starting via pm2..."
