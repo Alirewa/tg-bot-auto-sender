@@ -5,6 +5,7 @@ import { queue } from './scheduler/queue';
 import { startScheduler, stopScheduler } from './scheduler';
 import { createBot } from './bot';
 import { Telegraf } from 'telegraf';
+import { getPublishChannel } from './bot/publisher';
 
 /**
  * Verifies the bot can post to the configured publish channel.
@@ -12,32 +13,36 @@ import { Telegraf } from 'telegraf';
  * Never throws — a misconfigured channel should not crash the process.
  */
 async function verifyChannelAccess(bot: Telegraf): Promise<void> {
+  const channel = getPublishChannel();
+  if (!channel) {
+    logger.warn(
+      'boot: no publish channel configured. ' +
+        'Send /setchannel @yourchannel to the bot to set it.',
+    );
+    return;
+  }
   try {
-    const chat = await bot.telegram.getChat(config.publishChannel);
+    const chat = await bot.telegram.getChat(channel);
     const botInfo = await bot.telegram.getMe();
-    const member = await bot.telegram.getChatMember(config.publishChannel, botInfo.id);
-    const isAdmin =
-      member.status === 'administrator' || member.status === 'creator';
+    const member = await bot.telegram.getChatMember(channel, botInfo.id);
+    const isAdmin = member.status === 'administrator' || member.status === 'creator';
     if (isAdmin) {
       logger.info('boot: channel access OK', {
-        channel: config.publishChannel,
-        chatTitle: 'title' in chat ? chat.title : config.publishChannel,
+        channel,
+        chatTitle: 'title' in chat ? chat.title : channel,
       });
     } else {
       logger.warn(
         'boot: bot is in the channel but NOT an admin — publishing will fail. ' +
           'Make the bot an admin with "Post Messages" permission.',
-        { channel: config.publishChannel, status: member.status },
+        { channel, status: member.status },
       );
     }
   } catch (err) {
-    logger.error(
-      'boot: cannot access publish channel — check PUBLISH_CHANNEL and bot membership.',
-      {
-        channel: config.publishChannel,
-        error: err instanceof Error ? err.message : String(err),
-      },
-    );
+    logger.error('boot: cannot access publish channel — check channel ID and bot membership.', {
+      channel,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

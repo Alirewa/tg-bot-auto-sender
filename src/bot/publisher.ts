@@ -33,6 +33,14 @@ function classifyError(err: TelegramApiError): 'flood' | 'permanent' | 'transien
 }
 
 /**
+ * Returns the active publish channel — DB value takes precedence over .env
+ * so the admin can change it live via /setchannel without restarting.
+ */
+export function getPublishChannel(): string {
+  return SettingsRepo.getString('publish_channel', config.publishChannel);
+}
+
+/**
  * Builds the label injected into the config's own name field.
  * Template placeholders:
  *   {flag}     → country flag emoji
@@ -44,7 +52,7 @@ function renderLabel(template: string, c: ValidatedConfig, n: number): string {
   return template
     .replace(/\{flag\}/g, c.flag)
     .replace(/\{n\}/g, String(n))
-    .replace(/\{channel\}/g, config.publishChannelHandle)
+    .replace(/\{channel\}/g, getPublishChannel())
     .replace(/\{country\}/g, c.country);
 }
 
@@ -107,7 +115,11 @@ export async function publishConfig(bot: Telegraf, c: ValidatedConfig): Promise<
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await bot.telegram.sendMessage(config.publishChannel, text, {
+      const channel = getPublishChannel();
+      if (!channel) {
+        throw new PublishError('No publish channel configured. Use /setchannel in the bot.', true, false);
+      }
+      await bot.telegram.sendMessage(channel, text, {
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
       });

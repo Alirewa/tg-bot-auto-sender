@@ -109,21 +109,12 @@ setup_env() {
   printf '%s\n' "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
   echo
 
-  ask BOT_TOKEN      "Telegram Bot Token (from @BotFather)"   ""
-  ask ADMIN_USER_ID  "Admin User ID (from @userinfobot)"      ""
-  ask PUBLISH_CHANNEL "Publish Channel (e.g. @mychannel)"    "@mychannel"
-  ask SCRAPE_CRON    "Scrape interval (cron)"                 "*/10 * * * *"
-  ask PUBLISH_CRON   "Publish interval (cron)"                "* * * * *"
-  echo
-  printf '%s\n' "${CYAN}GitHub auto-publishing (press Enter to skip):${RESET}"
-  ask GITHUB_TOKEN   "GitHub Token (leave blank to skip)"     ""
-  ask GITHUB_REPO    "GitHub Repo (e.g. user/v2ray-subs)"    ""
-  ask LOG_LEVEL      "Log level (error|warn|info|debug)"      "info"
+  ask BOT_TOKEN     "Telegram Bot Token (from @BotFather)" ""
+  ask ADMIN_USER_ID "Admin User ID (from @userinfobot)"   ""
 
   # Validate mandatory fields
-  [ -z "$BOT_TOKEN" ]       && die "BOT_TOKEN is required"
-  [ -z "$ADMIN_USER_ID" ]   && die "ADMIN_USER_ID is required"
-  [ -z "$PUBLISH_CHANNEL" ] && die "PUBLISH_CHANNEL is required"
+  [ -z "$BOT_TOKEN" ]     && die "BOT_TOKEN is required"
+  [ -z "$ADMIN_USER_ID" ] && die "ADMIN_USER_ID is required"
 
   # Write .env from example, substituting values
   if [ -f "$example" ]; then
@@ -133,8 +124,7 @@ setup_env() {
   fi
 
   # set_env KEY VALUE — adds or replaces a KEY=VALUE line in the .env file.
-  # Uses a Python one-liner to avoid shell-escaping nightmares with cron strings
-  # that contain *, /, spaces, etc.
+  # Uses a Python one-liner to avoid shell-escaping nightmares with special chars.
   set_env() {
     local key="$1" val="$2"
     python3 - "$env_file" "$key" "$val" <<'PYEOF'
@@ -156,14 +146,8 @@ with open(path, 'w') as f: f.writelines(out)
 PYEOF
   }
 
-  set_env BOT_TOKEN       "$BOT_TOKEN"
-  set_env ADMIN_USER_ID   "$ADMIN_USER_ID"
-  set_env PUBLISH_CHANNEL "$PUBLISH_CHANNEL"
-  set_env SCRAPE_CRON     "$SCRAPE_CRON"
-  set_env PUBLISH_CRON    "$PUBLISH_CRON"
-  set_env LOG_LEVEL       "$LOG_LEVEL"
-  [ -n "$GITHUB_TOKEN" ] && set_env GITHUB_TOKEN "$GITHUB_TOKEN"
-  [ -n "$GITHUB_REPO" ]  && set_env GITHUB_REPO  "$GITHUB_REPO"
+  set_env BOT_TOKEN     "$BOT_TOKEN"
+  set_env ADMIN_USER_ID "$ADMIN_USER_ID"
 
   chmod 600 "$env_file"
   ok ".env written to $env_file"
@@ -234,7 +218,12 @@ print_summary() {
   printf '%s\n' "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
   printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel   (if install-tgpanel.sh was run)"
   echo
-  printf '%s\n' "  The bot will post the first config within ~1 minute."
+  printf '%s\n' "  ${BOLD}Next steps (inside Telegram):${RESET}"
+  printf '%s\n' "  1. Open a chat with your bot."
+  printf '%s\n' "  2. Send /setchannel @yourchannel to set the publish channel."
+  printf '%s\n' "  3. Make the bot an admin in that channel with Post Messages permission."
+  printf '%s\n' "  4. Send /forcescrape to validate configs and fill the queue."
+  printf '%s\n' "  5. The bot will start posting automatically every minute."
   echo
 }
 
