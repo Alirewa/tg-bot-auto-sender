@@ -382,6 +382,33 @@ function makeProgressEditor(
 // --------------------- registration ---------------------
 
 export function registerCommands(bot: Telegraf): void {
+  // Register the "/" command list visible in Telegram clients.
+  bot.telegram
+    .setMyCommands([
+      { command: 'start',       description: 'Admin panel (main menu)' },
+      { command: 'setchannel',  description: 'Set publish channel — /setchannel @username' },
+      { command: 'on',          description: 'Enable auto-send' },
+      { command: 'off',         description: 'Disable auto-send' },
+      { command: 'forcescrape', description: 'Run scrape cycle now' },
+      { command: 'forcecheck',  description: 'Re-validate entire queue' },
+      { command: 'stats',       description: 'Overall statistics' },
+      { command: 'analytics',   description: '24-hour analytics' },
+      { command: 'logs',        description: 'Recent logs' },
+      { command: 'sublink',     description: 'Subscription file links' },
+      { command: 'listsubs',    description: 'List subscription sources' },
+      { command: 'addsub',      description: 'Add source — /addsub https://...' },
+      { command: 'delsub',      description: 'Remove source — /delsub <id>' },
+      { command: 'template',    description: 'View / change post name template' },
+      { command: 'resetcounter',description: 'Reset post counter to zero' },
+      { command: 'ping',        description: 'Health check + uptime' },
+      { command: 'cancel',      description: 'Cancel current input prompt' },
+    ])
+    .catch((err) => {
+      logger.warn('setMyCommands failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
   bot.start((ctx) => showMain(ctx));
   bot.help((ctx) => showMain(ctx));
   bot.command('menu', (ctx) => showMain(ctx));

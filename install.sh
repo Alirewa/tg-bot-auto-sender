@@ -109,8 +109,13 @@ setup_env() {
   printf '%s\n' "${BOLD}${CYAN}══════════════════════════════════════════${RESET}"
   echo
 
-  ask BOT_TOKEN     "Telegram Bot Token (from @BotFather)" ""
-  ask ADMIN_USER_ID "Admin User ID (from @userinfobot)"   ""
+  ask BOT_TOKEN       "Telegram Bot Token (from @BotFather)"              ""
+  ask ADMIN_USER_ID   "Admin User ID (from @userinfobot)"                 ""
+  echo
+  printf '%s\n' "${CYAN}Publish channel — the channel where configs will be posted.${RESET}"
+  printf '%s\n' "${CYAN}The bot must be an admin there with Post Messages permission.${RESET}"
+  printf '%s\n' "${CYAN}You can also set or change this later with /setchannel inside the bot.${RESET}"
+  ask PUBLISH_CHANNEL "Channel username or ID (e.g. @mychannel or -1001234...)" ""
 
   # Validate mandatory fields
   [ -z "$BOT_TOKEN" ]     && die "BOT_TOKEN is required"
@@ -146,8 +151,11 @@ with open(path, 'w') as f: f.writelines(out)
 PYEOF
   }
 
-  set_env BOT_TOKEN     "$BOT_TOKEN"
-  set_env ADMIN_USER_ID "$ADMIN_USER_ID"
+  set_env BOT_TOKEN       "$BOT_TOKEN"
+  set_env ADMIN_USER_ID   "$ADMIN_USER_ID"
+  # Always write PUBLISH_CHANNEL — even if empty — so the @yourchannel
+  # placeholder from .env.example is never left in the generated .env.
+  set_env PUBLISH_CHANNEL "$PUBLISH_CHANNEL"
 
   chmod 600 "$env_file"
   ok ".env written to $env_file"
@@ -230,12 +238,18 @@ print_summary() {
   printf '%s\n' "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
   printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel"
   echo
-  printf '%s\n' "  ${BOLD}Next steps (inside Telegram):${RESET}"
-  printf '%s\n' "  1. Open a chat with your bot."
-  printf '%s\n' "  2. Send /setchannel @yourchannel to set the publish channel."
-  printf '%s\n' "  3. Make the bot an admin in that channel with Post Messages permission."
-  printf '%s\n' "  4. Send /forcescrape to validate configs and fill the queue."
-  printf '%s\n' "  5. The bot will start posting automatically every minute."
+  printf '%s\n' "  ${BOLD}Next steps:${RESET}"
+  if [ -n "$PUBLISH_CHANNEL" ]; then
+    printf '%s\n' "  1. Make sure the bot is an admin in ${PUBLISH_CHANNEL} with Post Messages permission."
+    printf '%s\n' "  2. Open a chat with your bot and send /forcescrape."
+    printf '%s\n' "  3. The bot will start posting automatically every minute."
+  else
+    printf '%s\n' "  1. Open a chat with your bot."
+    printf '%s\n' "  2. Send /setchannel @yourchannel to set the publish channel."
+    printf '%s\n' "  3. Make the bot an admin in that channel with Post Messages permission."
+    printf '%s\n' "  4. Send /forcescrape to validate configs and fill the queue."
+    printf '%s\n' "  5. The bot will start posting automatically every minute."
+  fi
   echo
 }
 
