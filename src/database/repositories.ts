@@ -13,8 +13,13 @@ function todayKey(): string {
 
 export const ConfigRepo = {
   exists(hash: string): boolean {
+    // Only block configs that are already queued or posted.
+    // Failed / dead configs are allowed back in — the server may have recovered,
+    // or a subscription source may have refreshed its credentials.
     const db = getDb();
-    const row = db.prepare('SELECT 1 FROM configs WHERE hash = ?').get(hash);
+    const row = db
+      .prepare("SELECT 1 FROM configs WHERE hash = ? AND status IN ('queued', 'posted')")
+      .get(hash);
     return !!row;
   },
 

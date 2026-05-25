@@ -21,13 +21,13 @@ export function autoTune(explicit: Partial<TunedValues>): TunedValues {
   let defaults: TunedValues;
 
   if (cpus >= 8 && ramGb > 8) {
-    defaults = { validationConcurrency: 1000, maxConfigsPerCycle: 5000, tcpTimeoutMs: 2500 };
+    defaults = { validationConcurrency: 1000, maxConfigsPerCycle: 500, tcpTimeoutMs: 2500 };
   } else if (cpus >= 4 && ramGb > 4) {
-    defaults = { validationConcurrency: 600, maxConfigsPerCycle: 2500, tcpTimeoutMs: 2500 };
+    defaults = { validationConcurrency: 600, maxConfigsPerCycle: 500, tcpTimeoutMs: 2500 };
   } else if (cpus >= 2 && ramGb > 2) {
-    defaults = { validationConcurrency: 300, maxConfigsPerCycle: 1200, tcpTimeoutMs: 2500 };
+    defaults = { validationConcurrency: 300, maxConfigsPerCycle: 500, tcpTimeoutMs: 2500 };
   } else {
-    defaults = { validationConcurrency: 100, maxConfigsPerCycle: 400, tcpTimeoutMs: 3000 };
+    defaults = { validationConcurrency: 100, maxConfigsPerCycle: 500, tcpTimeoutMs: 3000 };
   }
 
   const result: TunedValues = {
