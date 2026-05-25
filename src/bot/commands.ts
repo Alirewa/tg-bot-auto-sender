@@ -157,30 +157,48 @@ function templateMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 
 function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const xrayInstalled = !!findXrayBinary();
+  const autoXray = SettingsRepo.getBool('auto_xray', false);
+  const queueSize = queue.size();
+
   const text = [
     '<b>🔍 Scan</b>',
     '',
-    `Queue: <b>${queue.size()}</b> configs`,
-    `xray: <b>${xrayInstalled ? '✅ installed' : '❌ not found'}</b>`,
+    `Queue:      <b>${queueSize}</b> configs`,
+    `xray:       <b>${xrayInstalled ? '✅ installed' : '❌ not found'}</b>`,
+    `Auto-Xray:  <b>${autoXray ? '🟢 ON' : '⚪️ OFF'}</b>`,
     '',
-    '⏳ <b>Scrape now</b> — fetch new configs from all sources',
-    '♻️ <b>Re-check</b> — re-validate current queue (2500ms)',
-    '✅ <b>Validate strict</b> — keep only configs with ping &lt;1000ms',
-    `🧪 <b>Xray test</b> — ${xrayInstalled ? 'route real HTTP through each config (gold standard)' : 'install xray first (see below)'}`,
-    '🗑 <b>Clear queue</b> — empty queue completely',
+    '⏳ <b>Scrape now</b> — fetch from sources (asks which source)',
+    '♻️ <b>Re-check</b> — re-validate current queue',
+    '✅ <b>Strict</b> — keep only &lt;1000ms configs',
+    `🧪 <b>Xray test</b> — ${xrayInstalled ? 'real HTTP through each VPN (gold standard)' : 'install xray first ↓'}`,
+    '',
+    `🤖 <b>Auto-Xray</b>: when ON, every scrape cycle ends with an xray sweep`,
+    '   that removes configs whose credentials do not actually work.',
     ...(xrayInstalled ? [] : [
       '',
-      '⚠️ To enable Xray testing, run on server:',
+      '⚠️ Install xray on server:',
       '<code>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</code>',
     ]),
   ].join('\n');
 
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('⏳ Scrape now', 'act:scrape')],
-    [Markup.button.callback('♻️ Re-check queue', 'act:check')],
-    [Markup.button.callback('✅ Validate strict (<1000ms)', 'act:validate_strict')],
-    [Markup.button.callback(xrayInstalled ? '🧪 Xray test (real VPN check)' : '🧪 Xray — not installed', 'act:validate_xray')],
-    [Markup.button.callback('🗑 Clear queue', 'act:clear_queue')],
+    [
+      Markup.button.callback('♻️ Re-check', 'act:check'),
+      Markup.button.callback('✅ Strict (<1s)', 'act:validate_strict'),
+    ],
+    [Markup.button.callback(
+      xrayInstalled ? '🧪 Xray test (manual)' : '🧪 Xray — not installed',
+      'act:validate_xray',
+    )],
+    [Markup.button.callback(
+      autoXray ? '🤖 Auto-Xray: 🟢 ON  (tap to disable)' : '🤖 Auto-Xray: ⚪️ OFF (tap to enable)',
+      'act:toggle_auto_xray',
+    )],
+    [
+      Markup.button.callback('🗑 Clear queue', 'act:clear_queue'),
+      Markup.button.callback('🧹 Clean DB', 'act:clean_db'),
+    ],
     [Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
@@ -992,6 +1010,36 @@ export function registerCommands(bot: Telegraf): void {
             { parse_mode: 'HTML' },
           );
           return;
+
+        case 'toggle_auto_xray': {
+          const current = SettingsRepo.getBool('auto_xray', false);
+          SettingsRepo.setBool('auto_xray', !current);
+          await ctx.answerCbQuery(
+            !current ? '🤖 Auto-Xray enabled — next scrape will include xray sweep' : '⚪️ Auto-Xray disabled',
+          );
+          const sv = scanMenu();
+          await ctx.editMessageText(sv.text, { parse_mode: 'HTML', reply_markup: sv.keyboard });
+          return;
+        }
+
+        case 'clean_db': {
+          const deleted = ConfigRepo.deleteDeadAndFailed();
+          await ctx.answerCbQuery('DB cleaned');
+          await ctx.editMessageText(
+            `🧹 <b>DB cleaned.</b>\n\n` +
+              `Removed <b>${deleted}</b> dead/failed configs permanently.\n\n` +
+              `These configs can now be re-scraped and re-validated.\n` +
+              `Tip: run a fresh scrape after cleaning.`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('⬅️ Back to Scan', 'act:scan')],
+              ]).reply_markup,
+            },
+          );
+          logger.info('admin: dead/failed configs cleaned from DB', { deleted });
+          return;
+        }
 
         default:
           await ctx.answerCbQuery();

@@ -192,6 +192,30 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
       });
     }
 
+    // Auto-Xray sweep — runs AFTER TCP probe if the setting is enabled.
+    // Removes configs whose VPN credentials don't work (wrong UUID, expired account, etc.)
+    // before they ever get published. Only runs if xray binary is present on the server.
+    if (SettingsRepo.getBool('auto_xray', false) && aliveConfigs.length > 0) {
+      const xrayBin = findXrayBinary();
+      if (xrayBin) {
+        logger.info('scrape: auto-xray sweep starting', { configs: aliveConfigs.length });
+        try {
+          const xrayResult = await validateWithXray({});
+          logger.info('scrape: auto-xray sweep done', {
+            revalidated: xrayResult.revalidated,
+            alive: xrayResult.alive,
+            removed: xrayResult.revalidated - xrayResult.alive,
+          });
+        } catch (err) {
+          logger.warn('scrape: auto-xray sweep failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        logger.debug('scrape: auto-xray enabled but xray binary not found — skipping');
+      }
+    }
+
     // Generate subscription files from alive configs (non-blocking — errors are caught).
     if (aliveConfigs.length > 0) {
       try {

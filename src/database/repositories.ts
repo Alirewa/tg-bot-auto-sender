@@ -83,6 +83,23 @@ export const ConfigRepo = {
     const res = db.prepare(`DELETE FROM configs WHERE status = 'queued'`).run();
     return res.changes;
   },
+
+  /** Permanently remove all dead and failed configs from the DB.
+   *  This resets the dedup set so they can be re-scraped and re-validated.
+   *  Use sparingly — it lets previously-rejected configs back in. */
+  deleteDeadAndFailed(): number {
+    const db = getDb();
+    const res = db
+      .prepare(`DELETE FROM configs WHERE status IN ('dead', 'failed')`)
+      .run();
+    return res.changes;
+  },
+
+  /** Mark a config as permanently failed (won't be re-queued). */
+  markFailed(hash: string): void {
+    const db = getDb();
+    db.prepare(`UPDATE configs SET status = 'failed' WHERE hash = ?`).run(hash);
+  },
 };
 
 // ----------------------- stats -----------------------
