@@ -170,6 +170,23 @@ build_project() {
   ok "Build complete"
 }
 
+# ---------- xray ----------
+install_xray() {
+  if command -v xray >/dev/null 2>&1; then
+    ok "xray $(xray version 2>/dev/null | head -1 | awk '{print $2}') already installed"
+    return
+  fi
+
+  info "Installing Xray-core (XTLS official installer)..."
+  # The official one-line installer: https://github.com/XTLS/Xray-install
+  if bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install; then
+    ok "xray installed at $(command -v xray 2>/dev/null || echo '/usr/local/bin/xray')"
+  else
+    warn "xray installation failed — bot will still work, but Auto-Xray feature won't be available."
+    warn "You can install it manually later: bash -c \"\$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)\" @ install"
+  fi
+}
+
 # ---------- tgpanel ----------
 install_tgpanel() {
   local panel="$INSTALL_DIR/scripts/tgpanel.sh"
@@ -241,14 +258,23 @@ print_summary() {
   printf '%s\n' "  ${BOLD}Next steps:${RESET}"
   if [ -n "$PUBLISH_CHANNEL" ]; then
     printf '%s\n' "  1. Make sure the bot is an admin in ${PUBLISH_CHANNEL} with Post Messages permission."
-    printf '%s\n' "  2. Open a chat with your bot and send /forcescrape."
-    printf '%s\n' "  3. The bot will start posting automatically every minute."
+    printf '%s\n' "  2. Open a chat with your bot and send /start."
+    printf '%s\n' "  3. Go to Scan → enable 🤖 Auto-Xray for gold-standard config testing."
+    printf '%s\n' "  4. Press Scrape now — the bot fills the queue and starts posting."
   else
-    printf '%s\n' "  1. Open a chat with your bot."
+    printf '%s\n' "  1. Open a chat with your bot and send /start."
     printf '%s\n' "  2. Send /setchannel @yourchannel to set the publish channel."
     printf '%s\n' "  3. Make the bot an admin in that channel with Post Messages permission."
-    printf '%s\n' "  4. Send /forcescrape to validate configs and fill the queue."
-    printf '%s\n' "  5. The bot will start posting automatically every minute."
+    printf '%s\n' "  4. Go to Scan → enable 🤖 Auto-Xray for gold-standard config testing."
+    printf '%s\n' "  5. Press Scrape now — the bot fills the queue and starts posting automatically."
+  fi
+  if command -v xray >/dev/null 2>&1; then
+    printf '%s\n' ""
+    printf '%s\n' "  ${GREEN}✓ xray is installed — Auto-Xray feature is available in the Scan menu.${RESET}"
+  else
+    printf '%s\n' ""
+    printf '%s\n' "  ${YELLOW}⚠ xray was not installed. To add it later:${RESET}"
+    printf '%s\n' '    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install'
   fi
   echo
 }
@@ -262,6 +288,7 @@ main() {
   check_os
   install_deps
   install_node
+  install_xray
   setup_project
   setup_env
   build_project
