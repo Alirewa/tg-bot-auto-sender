@@ -160,39 +160,38 @@ function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const autoXray = SettingsRepo.getBool('auto_xray', false);
   const queueSize = queue.size();
 
+  const xrayStatus = xrayInstalled
+    ? `✅ installed — Auto-Xray ${autoXray ? '🟢 ON' : '⚪️ OFF'}`
+    : '❌ not found';
+
   const text = [
     '<b>🔍 Scan</b>',
     '',
-    `Queue:      <b>${queueSize}</b> configs`,
-    `xray:       <b>${xrayInstalled ? '✅ installed' : '❌ not found'}</b>`,
-    `Auto-Xray:  <b>${autoXray ? '🟢 ON' : '⚪️ OFF'}</b>`,
+    `Queue:  <b>${queueSize}</b> configs`,
+    `Xray:   <b>${xrayStatus}</b>`,
     '',
-    '⏳ <b>Scrape now</b> — fetch from sources (asks which source)',
-    '♻️ <b>Re-check</b> — re-validate current queue',
-    '✅ <b>Strict</b> — keep only &lt;1000ms configs',
-    `🧪 <b>Xray test</b> — ${xrayInstalled ? 'real HTTP through each VPN (gold standard)' : 'install xray first ↓'}`,
-    '',
-    `🤖 <b>Auto-Xray</b>: when ON, every scrape cycle ends with an xray sweep`,
-    '   that removes configs whose credentials do not actually work.',
+    '⏳ <b>Scrape</b> — fetch fresh configs (you choose which source)',
+    `🧪 <b>Test queue</b> — ${xrayInstalled
+      ? 'route real HTTP through each VPN and remove broken ones'
+      : 'TCP ping every config in queue (install xray for real testing)'}`,
+    `🤖 <b>Auto-Xray ${autoXray ? 'ON' : 'OFF'}</b> — ${autoXray
+      ? 'xray sweep runs after every scrape automatically'
+      : 'tap to run xray sweep after every scrape automatically'}`,
     ...(xrayInstalled ? [] : [
       '',
-      '⚠️ Install xray on server:',
+      '⚠️ Install xray for real VPN testing:',
       '<code>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</code>',
     ]),
   ].join('\n');
 
+  const testAction = xrayInstalled ? 'act:validate_xray' : 'act:validate_strict';
+  const testLabel  = xrayInstalled ? '🧪 Test queue (Xray)' : '🧪 Test queue (TCP)';
+
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('⏳ Scrape now', 'act:scrape')],
-    [
-      Markup.button.callback('♻️ Re-check', 'act:check'),
-      Markup.button.callback('✅ Strict (<1s)', 'act:validate_strict'),
-    ],
+    [Markup.button.callback(testLabel, testAction)],
     [Markup.button.callback(
-      xrayInstalled ? '🧪 Xray test (manual)' : '🧪 Xray — not installed',
-      'act:validate_xray',
-    )],
-    [Markup.button.callback(
-      autoXray ? '🤖 Auto-Xray: 🟢 ON  (tap to disable)' : '🤖 Auto-Xray: ⚪️ OFF (tap to enable)',
+      autoXray ? '🤖 Auto-Xray: 🟢 ON' : '🤖 Auto-Xray: ⚪️ OFF',
       'act:toggle_auto_xray',
     )],
     [
@@ -905,14 +904,10 @@ export function registerCommands(bot: Telegraf): void {
           return;
         }
 
-        case 'check':
-          await ctx.answerCbQuery('Re-checking...');
-          await runCheckWithProgress(ctx, '<b>♻️ Re-checking queue</b>');
-          return;
-
         case 'validate_strict':
-          await ctx.answerCbQuery('Validating with 1000ms timeout...');
-          await runValidateStrictWithProgress(ctx, '<b>✅ Validate strict (&lt;1000ms)</b>');
+          // Reached when xray is not installed — "Test queue" falls back to TCP strict mode.
+          await ctx.answerCbQuery('Testing queue (TCP strict)...');
+          await runValidateStrictWithProgress(ctx, '<b>🧪 Test queue — TCP strict (&lt;1000ms)</b>');
           return;
 
         case 'validate_xray':
