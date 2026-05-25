@@ -25,7 +25,7 @@ const AUTO_SEND_WARN_INTERVAL_MS = 5 * 60 * 1000;
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface ScrapeProgressEvent {
-  phase: 'fetching' | 'parsing' | 'validating' | 'done';
+  phase: 'fetching' | 'parsing' | 'validating' | 'xray' | 'done';
   scraped?: number;
   fresh?: number;
   validated?: number;
@@ -148,13 +148,6 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
     const removed = ConfigRepo.deleteOldDead(ONE_WEEK_MS);
     if (removed > 0) logger.info('cleanup: removed old dead configs', { removed });
 
-    opts.onProgress?.({
-      phase: 'done',
-      scraped: parsed.length,
-      fresh: sample.length,
-      alive: alive.length,
-    });
-
     // Record analytics for this cycle.
     try {
       const protoCounts: Record<string, number> = {};
@@ -193,14 +186,27 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
     }
 
     // Xray sweep — always runs after TCP probe if xray binary is present.
-    // Removes configs whose VPN credentials don't actually work
-    // (wrong UUID, expired account, quota exceeded) before they get published.
+    // Progress is forwarded to the caller so the UI can show a live xray bar.
+    let finalAlive = alive.length;
     if (aliveConfigs.length > 0) {
       const xrayBin = findXrayBinary();
       if (xrayBin) {
         logger.info('scrape: xray sweep starting', { configs: aliveConfigs.length });
+        opts.onProgress?.({ phase: 'xray', total: aliveConfigs.length, done: 0, alive: 0 });
         try {
-          const xrayResult = await validateWithXray({});
+          const xrayResult = await validateWithXray({
+            onProgress: (e) => {
+              opts.onProgress?.({
+                phase: 'xray',
+                total: e.total,
+                done: e.done,
+                alive: e.alive,
+                scraped: parsed.length,
+                fresh: sample.length,
+              });
+            },
+          });
+          finalAlive = xrayResult.alive;
           logger.info('scrape: xray sweep done', {
             revalidated: xrayResult.revalidated,
             alive: xrayResult.alive,
@@ -213,6 +219,14 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
         }
       }
     }
+
+    // Fire done AFTER xray so the final summary reflects confirmed-working configs.
+    opts.onProgress?.({
+      phase: 'done',
+      scraped: parsed.length,
+      fresh: sample.length,
+      alive: finalAlive,
+    });
 
     // Generate subscription files from alive configs (non-blocking — errors are caught).
     if (aliveConfigs.length > 0) {

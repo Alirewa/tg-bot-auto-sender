@@ -426,16 +426,28 @@ function makeProgressEditor(
         body = '⬇️  Fetching sources...';
         break;
       case 'parsing':
-        body = `🔎 Parsed ${e.scraped ?? 0} configs from sources.`;
+        body = `🔎 Parsed <b>${e.scraped ?? 0}</b> configs — checking duplicates...`;
         break;
       case 'validating': {
         const total = e.total ?? 0;
         const done = e.done ?? 0;
         const alive = e.alive ?? 0;
         body = [
-          `🧪 Validating ${done}/${total}`,
+          `🔌 TCP probe: <b>${done}/${total}</b>`,
           progressBar(done, total),
-          `   alive so far: ${alive}`,
+          `   alive so far: <b>${alive}</b>`,
+        ].join('\n');
+        break;
+      }
+      case 'xray': {
+        const total = e.total ?? 0;
+        const done = e.done ?? 0;
+        const alive = e.alive ?? 0;
+        body = [
+          `🔌 TCP: <b>${e.fresh ?? total}</b> tested`,
+          `🧪 Xray sweep: <b>${done}/${total}</b>`,
+          progressBar(done, total),
+          `   confirmed working: <b>${alive}</b>`,
         ].join('\n');
         break;
       }
@@ -446,10 +458,10 @@ function makeProgressEditor(
         body = [
           '✅ Done.',
           '',
-          `Parsed:    ${scraped}`,
-          `Fresh:     ${fresh}`,
-          `Alive:     ${alive}`,
-          `Queue:     ${queue.size()}`,
+          `Scraped:   <b>${scraped}</b>`,
+          `Tested:    <b>${fresh}</b>`,
+          `✓ Working: <b>${alive}</b>`,
+          `Queue:     <b>${queue.size()}</b>`,
         ].join('\n');
         break;
       }
