@@ -97,6 +97,7 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     ],
     [
       Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
+      Markup.button.callback('🗑 Clear queue', 'act:clear_queue'),
     ],
   ]).reply_markup;
 
@@ -421,6 +422,7 @@ export function registerCommands(bot: Telegraf): void {
       { command: 'delsub',      description: 'Remove source — /delsub <id>' },
       { command: 'template',    description: 'View / change post name template' },
       { command: 'resetcounter',description: 'Reset post counter to zero' },
+      { command: 'clearqueue',   description: 'Clear entire queue (with confirmation)' },
       { command: 'ping',        description: 'Health check + uptime' },
       { command: 'cancel',      description: 'Cancel current input prompt' },
     ])
@@ -477,6 +479,25 @@ export function registerCommands(bot: Telegraf): void {
   bot.command('resetcounter', async (ctx) => {
     SettingsRepo.setInt('post_counter', 0);
     await ctx.reply('🔢 Counter reset to zero.');
+  });
+
+  bot.command('clearqueue', async (ctx) => {
+    const size = queue.size();
+    await ctx.reply(
+      `⚠️ <b>Clear entire queue?</b>\n\n` +
+        `This will permanently delete <b>${size}</b> queued configs from RAM and DB.\n` +
+        `They can be re-discovered on the next scrape.\n\n` +
+        `This action cannot be undone.`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: Markup.inlineKeyboard([
+          [
+            Markup.button.callback('✅ Yes, clear it', 'act:clear_queue_confirm'),
+            Markup.button.callback('❌ Cancel', 'act:menu'),
+          ],
+        ]).reply_markup,
+      },
+    );
   });
 
   bot.command('listsubs', async (ctx) => {
@@ -660,6 +681,42 @@ export function registerCommands(bot: Telegraf): void {
           await ctx.answerCbQuery('Counter reset');
           await showMain(ctx, true);
           return;
+
+        case 'clear_queue': {
+          const size = queue.size();
+          await ctx.answerCbQuery();
+          await ctx.editMessageText(
+            `⚠️ <b>Clear entire queue?</b>\n\n` +
+              `This will permanently delete <b>${size}</b> queued configs from RAM and DB.\n` +
+              `They can be re-discovered on the next scrape.\n\n` +
+              `This action cannot be undone.`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([
+                [
+                  Markup.button.callback('✅ Yes, clear it', 'act:clear_queue_confirm'),
+                  Markup.button.callback('❌ Cancel', 'act:menu'),
+                ],
+              ]).reply_markup,
+            },
+          );
+          return;
+        }
+
+        case 'clear_queue_confirm': {
+          const deleted = ConfigRepo.deleteAllQueued();
+          queue.clear();
+          await ctx.answerCbQuery('Queue cleared');
+          await ctx.editMessageText(
+            `🗑 <b>Queue cleared.</b>\n\n` +
+              `Removed <b>${deleted}</b> configs from DB and flushed RAM queue.\n\n` +
+              `The next scrape cycle will refill the queue with fresh validated configs.\n` +
+              `Tap <b>⏳ Scrape now</b> to trigger immediately.`,
+            { parse_mode: 'HTML', reply_markup: backToMenuKb() },
+          );
+          logger.info('admin: queue cleared manually', { deleted });
+          return;
+        }
 
         case 'scrape':
           await ctx.answerCbQuery('Starting scrape...');
