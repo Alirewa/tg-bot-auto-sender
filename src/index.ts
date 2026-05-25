@@ -1,3 +1,9 @@
+// Node.js 18+ prefers IPv6 by default. Many servers (incl. Hetzner) have
+// broken IPv6 routes to api.telegram.org — this causes bot.launch() to hang
+// indefinitely. Force IPv4 DNS order to match curl's behaviour.
+import { setDefaultResultOrder } from 'dns';
+setDefaultResultOrder('ipv4first');
+
 import config from './utils/config';
 import logger from './utils/logger';
 import { getDb, closeDb } from './database';
