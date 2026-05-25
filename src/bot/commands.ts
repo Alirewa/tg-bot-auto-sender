@@ -20,6 +20,7 @@ import {
   ScrapeProgressEvent,
 } from '../scheduler';
 import { findXrayBinary } from '../validator/xray';
+import { getActiveSources } from '../scraper/sources';
 
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
@@ -181,6 +182,38 @@ function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     [Markup.button.callback(xrayInstalled ? '🧪 Xray test (real VPN check)' : '🧪 Xray — not installed', 'act:validate_xray')],
     [Markup.button.callback('🗑 Clear queue', 'act:clear_queue')],
     [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+  ]).reply_markup;
+
+  return { text, keyboard: kb };
+}
+
+function scrapeSourceMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
+  const sources = getActiveSources();
+
+  const lines = sources.length
+    ? sources.map((s) => {
+        const truncUrl = s.url.length > 55 ? s.url.slice(0, 55) + '…' : s.url;
+        return `  <b>#${s.id}</b>  <code>${escapeHtml(truncUrl)}</code>`;
+      })
+    : ['  — no enabled sources yet'];
+
+  const text = [
+    '<b>⏳ Scrape — select source</b>',
+    '',
+    'Choose which subscription source to scrape:',
+    '',
+    ...lines,
+  ].join('\n');
+
+  const sourceRows = sources.map((s) => {
+    const btnLabel = `#${s.id}  ${s.url.length > 32 ? s.url.slice(0, 32) + '…' : s.url}`;
+    return [Markup.button.callback(btnLabel, `act:do_scrape:${s.id}`)];
+  });
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('🌐 All sources', 'act:do_scrape:all')],
+    ...sourceRows,
+    [Markup.button.callback('⬅️ Back to Scan', 'act:scan')],
   ]).reply_markup;
 
   return { text, keyboard: kb };
@@ -569,11 +602,15 @@ export function registerCommands(bot: Telegraf): void {
   });
 
   // Scrape and check now support live progress.
-  async function runScrapeWithProgress(ctx: Context, header: string): Promise<void> {
+  async function runScrapeWithProgress(
+    ctx: Context,
+    header: string,
+    sourceIds?: number[],
+  ): Promise<void> {
     const msg = await ctx.reply(`${header}\n\n⏳ Starting...`, { parse_mode: 'HTML' });
     const messageId = (msg as { message_id: number }).message_id;
     const onProgress = makeProgressEditor(ctx, messageId, header);
-    await runScrapeCycle({ onProgress });
+    await runScrapeCycle({ onProgress, sourceIds });
   }
 
   async function runCheckWithProgress(ctx: Context, header: string): Promise<void> {
@@ -710,6 +747,31 @@ export function registerCommands(bot: Telegraf): void {
     const userId = ctx.from?.id ?? 0;
 
     try {
+      // ---- Dynamic: do_scrape:all | do_scrape:<id> ----
+      if (action.startsWith('do_scrape:')) {
+        const target = action.slice('do_scrape:'.length);
+        let sourceIds: number[] | undefined;
+        let scrapeLabel = '🌐 All sources';
+        if (target !== 'all') {
+          const id = Number.parseInt(target, 10);
+          if (Number.isFinite(id)) {
+            sourceIds = [id];
+            const sources = getActiveSources();
+            const src = sources.find((s) => s.id === id);
+            scrapeLabel = src
+              ? `#${id} ${src.url.length > 30 ? src.url.slice(0, 30) + '…' : src.url}`
+              : `Source #${id}`;
+          }
+        }
+        await ctx.answerCbQuery(`Scraping ${scrapeLabel}...`);
+        await runScrapeWithProgress(
+          ctx,
+          `<b>⏳ Scraping:</b> ${escapeHtml(scrapeLabel)}`,
+          sourceIds,
+        );
+        return;
+      }
+
       switch (action) {
         case 'menu':
           await ctx.answerCbQuery();
@@ -818,10 +880,12 @@ export function registerCommands(bot: Telegraf): void {
           return;
         }
 
-        case 'scrape':
-          await ctx.answerCbQuery('Starting scrape...');
-          await runScrapeWithProgress(ctx, '<b>⏳ Scrape cycle</b>');
+        case 'scrape': {
+          await ctx.answerCbQuery();
+          const ssv = scrapeSourceMenu();
+          await ctx.editMessageText(ssv.text, { parse_mode: 'HTML', reply_markup: ssv.keyboard });
           return;
+        }
 
         case 'check':
           await ctx.answerCbQuery('Re-checking...');
