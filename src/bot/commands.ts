@@ -14,6 +14,7 @@ import {
 import { queue } from '../scheduler/queue';
 import {
   forceValidateQueue,
+  validateQueueStrict,
   runScrapeCycle,
   ScrapeProgressEvent,
 } from '../scheduler';
@@ -81,15 +82,11 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     ],
     [
       Markup.button.callback('🔗 Sources', 'act:subs'),
-      Markup.button.callback('♻️ Re-check queue', 'act:check'),
+      Markup.button.callback('🔍 Scan', 'act:scan'),
     ],
     [
-      Markup.button.callback('⏳ Scrape now', 'act:scrape'),
       Markup.button.callback('📈 Analytics', 'act:analytics'),
-    ],
-    [
       Markup.button.callback('📡 Sub links', 'act:sublink'),
-      Markup.button.callback('🔄 Refresh', 'act:menu'),
     ],
     [
       Markup.button.callback('📋 Publish logs', 'act:logs_publish'),
@@ -97,7 +94,7 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     ],
     [
       Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
-      Markup.button.callback('🗑 Clear queue', 'act:clear_queue'),
+      Markup.button.callback('🔄 Refresh', 'act:menu'),
     ],
   ]).reply_markup;
 
@@ -149,6 +146,29 @@ function templateMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('✏️ Edit template', 'act:set_template')],
     [Markup.button.callback('↩️ Reset to default', 'act:reset_template')],
+    [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+  ]).reply_markup;
+
+  return { text, keyboard: kb };
+}
+
+function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
+  const text = [
+    '<b>🔍 Scan</b>',
+    '',
+    `Queue: <b>${queue.size()}</b> configs`,
+    '',
+    '⏳ <b>Scrape now</b> — fetch new configs from all sources',
+    '♻️ <b>Re-check</b> — re-validate current queue (2500ms timeout)',
+    '✅ <b>Validate strict</b> — keep only configs with ping &lt;1000ms',
+    '🗑 <b>Clear queue</b> — empty queue completely',
+  ].join('\n');
+
+  const kb = Markup.inlineKeyboard([
+    [Markup.button.callback('⏳ Scrape now', 'act:scrape')],
+    [Markup.button.callback('♻️ Re-check queue', 'act:check')],
+    [Markup.button.callback('✅ Validate strict (<1000ms)', 'act:validate_strict')],
+    [Markup.button.callback('🗑 Clear queue', 'act:clear_queue')],
     [Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
@@ -552,6 +572,27 @@ export function registerCommands(bot: Telegraf): void {
     await forceValidateQueue({ onProgress });
   }
 
+  async function runValidateStrictWithProgress(ctx: Context, header: string): Promise<void> {
+    const before = queue.size();
+    const msg = await ctx.reply(
+      `${header}\n\n⏳ Testing ${before} configs with 1000ms timeout...\nOnly configs that respond in &lt;1s will survive.`,
+      { parse_mode: 'HTML' },
+    );
+    const messageId = (msg as { message_id: number }).message_id;
+    const onProgress = makeProgressEditor(ctx, messageId, header);
+    const result = await validateQueueStrict({ onProgress });
+    // Final summary edit
+    ctx.telegram
+      .editMessageText(
+        ctx.chat!.id,
+        messageId,
+        undefined,
+        `${header}\n\n✅ Done.\n\nTested:   ${result.revalidated}\nSurvived: <b>${result.alive}</b> (ping &lt;1000ms)\nRemoved:  ${result.revalidated - result.alive}`,
+        { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Scan', 'act:scan')]]).reply_markup },
+      )
+      .catch(() => {});
+  }
+
   bot.command('forcescrape', (ctx) =>
     runScrapeWithProgress(ctx, '<b>⏳ Scrape cycle</b>'),
   );
@@ -718,6 +759,13 @@ export function registerCommands(bot: Telegraf): void {
           return;
         }
 
+        case 'scan': {
+          await ctx.answerCbQuery();
+          const sv = scanMenu();
+          await ctx.editMessageText(sv.text, { parse_mode: 'HTML', reply_markup: sv.keyboard });
+          return;
+        }
+
         case 'scrape':
           await ctx.answerCbQuery('Starting scrape...');
           await runScrapeWithProgress(ctx, '<b>⏳ Scrape cycle</b>');
@@ -726,6 +774,11 @@ export function registerCommands(bot: Telegraf): void {
         case 'check':
           await ctx.answerCbQuery('Re-checking...');
           await runCheckWithProgress(ctx, '<b>♻️ Re-checking queue</b>');
+          return;
+
+        case 'validate_strict':
+          await ctx.answerCbQuery('Validating with 1000ms timeout...');
+          await runValidateStrictWithProgress(ctx, '<b>✅ Validate strict (&lt;1000ms)</b>');
           return;
 
         case 'add_sub':

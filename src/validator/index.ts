@@ -17,6 +17,8 @@ export type ProgressCallback = (p: ValidateProgress) => void;
 export interface StreamCallbacks {
   onAlive?: (c: ValidatedConfig) => void;
   onProgress?: ProgressCallback;
+  /** Override the global TCP/WS timeout for this batch (ms). */
+  timeoutMs?: number;
 }
 
 /**
@@ -36,15 +38,17 @@ export async function validateStreaming(
   let aliveCount = 0;
   let deadCount = 0;
 
+  const effectiveTimeoutMs = cb.timeoutMs ?? config.tcpTimeoutMs;
+
   logger.info('validate: starting', {
     total: configs.length,
     concurrency: config.validationConcurrency,
-    timeoutMs: config.tcpTimeoutMs,
+    timeoutMs: effectiveTimeoutMs,
   });
 
   const tasks = configs.map((c) =>
     limit(async () => {
-      const probe = await smartProbe(c, config.tcpTimeoutMs);
+      const probe = await smartProbe(c, effectiveTimeoutMs);
       done++;
       if (!probe.alive) {
         deadCount++;

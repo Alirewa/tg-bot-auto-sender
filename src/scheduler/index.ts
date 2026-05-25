@@ -329,6 +329,45 @@ export function stopScheduler(): void {
   logger.info('scheduler: stopped');
 }
 
+/**
+ * Re-validates the current queue with a strict 1000ms timeout.
+ * Only configs that respond within 1 second survive — the rest are marked dead.
+ * Produces a much smaller but much higher-quality queue.
+ */
+export async function validateQueueStrict(
+  opts: ScrapeOptions = {},
+): Promise<{ revalidated: number; alive: number }> {
+  const STRICT_TIMEOUT_MS = 1000;
+  const rows = ConfigRepo.loadQueued();
+  const parsed: ParsedConfig[] = rows.map((r) => ({
+    hash: r.hash,
+    raw: r.raw,
+    protocol: r.protocol,
+    host: r.host,
+    port: r.port,
+  }));
+
+  opts.onProgress?.({ phase: 'validating', total: parsed.length, done: 0, alive: 0 });
+
+  const alive = await validateStreaming(parsed, {
+    timeoutMs: STRICT_TIMEOUT_MS,
+    onProgress: (p) => {
+      opts.onProgress?.({ phase: 'validating', total: p.total, done: p.done, alive: p.alive });
+    },
+    onAlive: () => {},
+  });
+
+  const aliveHashes = new Set(alive.map((a) => a.hash));
+  for (const r of rows) {
+    if (!aliveHashes.has(r.hash)) ConfigRepo.markDead(r.hash);
+  }
+  queue.clear();
+  queue.enqueueMany(alive);
+  opts.onProgress?.({ phase: 'done', total: rows.length, alive: alive.length });
+  logger.info('validate-strict: done', { revalidated: rows.length, alive: alive.length });
+  return { revalidated: rows.length, alive: alive.length };
+}
+
 export async function forceValidateQueue(
   opts: ScrapeOptions = {},
 ): Promise<{ revalidated: number; alive: number }> {
