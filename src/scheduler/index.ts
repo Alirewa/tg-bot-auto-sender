@@ -18,9 +18,19 @@ let scrapeTask: ScheduledTask | null = null;
 let scraping = false;
 let publishing = false;
 
-export function isScraping(): boolean {
-  return scraping;
+// All active progress listeners — supports multiple concurrent callers
+// watching the same scrape cycle (e.g. manual trigger while auto-cycle runs).
+const progressListeners = new Set<(e: ScrapeProgressEvent) => void>();
+
+function broadcast(e: ScrapeProgressEvent): void {
+  for (const cb of progressListeners) {
+    try { cb(e); } catch { /* never let a bad listener crash the cycle */ }
+  }
+  if (e.phase === 'done') progressListeners.clear();
 }
+
+export function isScraping(): boolean { return scraping; }
+
 // Throttle the "auto_send is OFF" warning to once per 5 minutes so it
 // appears in logs at warn level without flooding them.
 let lastAutoSendWarnMs = 0;
@@ -60,15 +70,20 @@ function shuffleInPlace<T>(arr: T[]): void {
 }
 
 export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeResult> {
+  // Register this caller's progress listener — works even when already scraping,
+  // so a second manual trigger joins the live cycle instead of hanging.
+  if (opts.onProgress) progressListeners.add(opts.onProgress);
+
   if (scraping) {
-    logger.info('scrape: skipped, already running');
+    logger.info('scrape: already running — subscriber joined');
+    // Caller will receive remaining broadcast events from the running cycle.
     return { scraped: 0, fresh: 0, alive: 0, added: 0 };
   }
   scraping = true;
   const empty: ScrapeResult = { scraped: 0, fresh: 0, alive: 0, added: 0 };
 
   try {
-    opts.onProgress?.({ phase: 'fetching' });
+    broadcast({ phase: 'fetching' });
     const { configs: parsed, perSource } = await scrapeAll(opts.sourceIds);
     if (perSource.length > 0) {
       logger.info('scrape: per-source results', {
@@ -80,14 +95,13 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
         })),
       });
     }
-    opts.onProgress?.({ phase: 'parsing', scraped: parsed.length });
+    broadcast({ phase: 'parsing', scraped: parsed.length });
 
     // Filter against permanent dedup set.
     const fresh = parsed.filter((c) => !ConfigRepo.exists(c.hash));
     logger.info('scrape: fresh after dedup', { fresh: fresh.length, total: parsed.length });
 
-    // Randomly sample to cap cycle time. Without this a single 50k source
-    // could lock the cycle for hours at 5s/probe.
+    // Randomly sample to cap cycle time.
     let sample: ParsedConfig[] = fresh;
     if (fresh.length > config.maxConfigsPerCycle) {
       shuffleInPlace(fresh);
@@ -100,12 +114,12 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
     }
 
     if (sample.length === 0) {
-      opts.onProgress?.({ phase: 'done', scraped: parsed.length, fresh: 0, alive: 0 });
+      broadcast({ phase: 'done', scraped: parsed.length, fresh: 0, alive: 0 });
       return { scraped: parsed.length, fresh: 0, alive: 0, added: 0 };
     }
 
     const progressCb: ProgressCallback = (p) => {
-      opts.onProgress?.({
+      broadcast({
         phase: 'validating',
         scraped: parsed.length,
         fresh: sample.length,
@@ -200,7 +214,7 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
         try {
           const xrayResult = await validateWithXray({
             onProgress: (e) => {
-              opts.onProgress?.({
+              broadcast({
                 phase: 'xray',
                 total: e.total,
                 done: e.done,
@@ -225,7 +239,7 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
     }
 
     // Fire done AFTER xray so the final summary reflects confirmed-working configs.
-    opts.onProgress?.({
+    broadcast({
       phase: 'done',
       scraped: parsed.length,
       fresh: sample.length,

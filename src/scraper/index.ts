@@ -4,6 +4,7 @@ import { parseConfigsFromText } from './parser';
 import { ParsedConfig } from '../types';
 import { retry } from '../utils/retry';
 import logger from '../utils/logger';
+import { SubsRepo } from '../database/repositories';
 
 const HTTP_TIMEOUT_MS = 15_000;
 
@@ -82,4 +83,82 @@ export async function scrapeAll(sourceIds?: number[]): Promise<{
 
   logger.info('scrape: parsed', { total: allParsed.length, unique: configs.length });
   return { configs, perSource };
+}
+
+// ---------------------------------------------------------------------------
+// Source health check
+// ---------------------------------------------------------------------------
+
+export type SourceHealthStatus = 'ok' | 'empty' | 'error';
+
+export interface SourceHealthResult {
+  id: number;
+  url: string;
+  enabled: boolean;
+  status: SourceHealthStatus;
+  configCount: number;
+  error?: string;
+}
+
+/**
+ * Fetch every source (enabled + disabled) and report how many valid
+ * configs each one returns.  Broken or empty sources are auto-disabled.
+ *
+ * @returns per-source results + how many were auto-disabled
+ */
+export async function checkSourcesHealth(): Promise<{
+  results: SourceHealthResult[];
+  autoDisabled: number;
+}> {
+  const all = SubsRepo.list();
+  if (all.length === 0) return { results: [], autoDisabled: 0 };
+
+  logger.info('source-health: checking', { total: all.length });
+
+  const fetches = await Promise.allSettled(all.map((s) => fetchOne(s.url)));
+
+  const results: SourceHealthResult[] = [];
+  let autoDisabled = 0;
+
+  for (let i = 0; i < all.length; i++) {
+    const sub = all[i]!;
+    const r = fetches[i]!;
+
+    let status: SourceHealthStatus;
+    let configCount = 0;
+    let error: string | undefined;
+
+    if (r.status === 'rejected') {
+      error = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      status = 'error';
+    } else {
+      configCount = parseConfigsFromText(r.value).length;
+      status = configCount > 0 ? 'ok' : 'empty';
+    }
+
+    // Auto-disable sources that are broken or return nothing.
+    if (status !== 'ok' && sub.enabled) {
+      SubsRepo.toggle(sub.id, false);
+      autoDisabled++;
+      logger.warn('source-health: auto-disabled', { id: sub.id, url: sub.url, status, error });
+    }
+
+    results.push({
+      id: sub.id,
+      url: sub.url,
+      enabled: sub.enabled === 1,
+      status,
+      configCount,
+      error,
+    });
+  }
+
+  logger.info('source-health: done', {
+    ok: results.filter((r) => r.status === 'ok').length,
+    empty: results.filter((r) => r.status === 'empty').length,
+    error: results.filter((r) => r.status === 'error').length,
+    autoDisabled,
+  });
+
+  return { results, autoDisabled };
 }
