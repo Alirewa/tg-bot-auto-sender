@@ -17,6 +17,7 @@ import {
   validateQueueStrict,
   validateWithXray,
   runScrapeCycle,
+  isScraping,
   ScrapeProgressEvent,
 } from '../scheduler';
 import { findXrayBinary } from '../validator/xray';
@@ -474,7 +475,7 @@ function makeProgressEditor(
         // Ignore "message is not modified" — happens when nothing changed.
         const msg = err instanceof Error ? err.message : String(err);
         if (!msg.includes('message is not modified')) {
-          logger.debug('progress edit failed', { error: msg });
+          logger.warn('progress edit failed', { phase: e.phase, chatId: ctx.chat?.id, messageId, error: msg });
         }
       });
   };
@@ -622,6 +623,16 @@ export function registerCommands(bot: Telegraf): void {
     header: string,
     sourceIds?: number[],
   ): Promise<void> {
+    // Guard: if a cycle is already running (e.g. automatic startup scrape),
+    // tell the user instead of silently hanging on "⏳ Starting...".
+    if (isScraping()) {
+      await ctx.reply(
+        `${header}\n\n⏳ <b>A scrape cycle is already running.</b>\n\nPlease wait for it to finish — this usually takes 1–5 minutes.\nThe queue will update automatically when it's done.`,
+        { parse_mode: 'HTML', reply_markup: backToMenuKb() },
+      );
+      return;
+    }
+
     const msg = await ctx.reply(`${header}\n\n⏳ Starting...`, { parse_mode: 'HTML' });
     const messageId = (msg as { message_id: number }).message_id;
     const onProgress = makeProgressEditor(ctx, messageId, header);
