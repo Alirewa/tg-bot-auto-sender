@@ -10,6 +10,18 @@ function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
+/**
+ * Strip the fragment (#name label) from a config URI before hashing.
+ * This prevents the same server config appearing under multiple display
+ * names from counting as distinct entries.
+ * e.g. vless://uuid@host:443?params#Label-A  and
+ *      vless://uuid@host:443?params#Label-B  → same hash
+ */
+function canonicalRaw(raw: string): string {
+  const hi = raw.indexOf('#');
+  return hi >= 0 ? raw.slice(0, hi) : raw;
+}
+
 function normalize(raw: string): string {
   return raw.trim();
 }
@@ -269,7 +281,7 @@ export function parseConfigsFromText(text: string): ParsedConfig[] {
         continue;
       }
       out.push({
-        hash: sha256(raw),
+        hash: sha256(canonicalRaw(raw)),
         raw,
         protocol,
         host: hp.host,

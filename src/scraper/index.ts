@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { getActiveSourceUrls } from './sources';
+import { getActiveSources, Source } from './sources';
 import { parseConfigsFromText } from './parser';
 import { ParsedConfig } from '../types';
 import { retry } from '../utils/retry';
@@ -26,36 +26,60 @@ async function fetchOne(url: string): Promise<string> {
   );
 }
 
-export async function scrapeAll(): Promise<ParsedConfig[]> {
-  const urls = getActiveSourceUrls();
-  if (urls.length === 0) {
-    logger.warn('scrape: no enabled subscription links');
-    return [];
+export interface PerSourceResult {
+  source: Source;
+  parsed: number;
+  error?: string;
+}
+
+/**
+ * Scrape configs from sources.
+ *
+ * @param sourceIds  If provided, only scrape sources with these IDs.
+ *                   If omitted/empty, scrape all enabled sources.
+ * @returns          Deduplicated configs + per-source breakdown.
+ */
+export async function scrapeAll(sourceIds?: number[]): Promise<{
+  configs: ParsedConfig[];
+  perSource: PerSourceResult[];
+}> {
+  let sources = getActiveSources();
+  if (sourceIds && sourceIds.length > 0) {
+    sources = sources.filter((s) => sourceIds.includes(s.id));
   }
-  logger.info('scrape: starting', { sources: urls.length });
+  if (sources.length === 0) {
+    logger.warn('scrape: no enabled subscription links');
+    return { configs: [], perSource: [] };
+  }
+  logger.info('scrape: starting', { sources: sources.length, filter: sourceIds ?? 'all' });
 
-  const results = await Promise.allSettled(urls.map((u) => fetchOne(u)));
+  const results = await Promise.allSettled(sources.map((s) => fetchOne(s.url)));
 
+  const perSource: PerSourceResult[] = [];
   let combinedText = '';
+
   for (let i = 0; i < results.length; i++) {
-    const r = results[i];
+    const r = results[i]!;
+    const src = sources[i]!;
     if (r.status === 'fulfilled') {
-      combinedText += '\n' + r.value;
+      const text = r.value;
+      const parsed = parseConfigsFromText(text);
+      perSource.push({ source: src, parsed: parsed.length });
+      combinedText += '\n' + text;
     } else {
-      logger.warn('scrape: source failed', {
-        source: urls[i],
-        error: r.reason instanceof Error ? r.reason.message : String(r.reason),
-      });
+      const errMsg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      logger.warn('scrape: source failed', { source: src.url, error: errMsg });
+      perSource.push({ source: src, parsed: 0, error: errMsg });
     }
   }
 
-  const parsed = parseConfigsFromText(combinedText);
+  const allParsed = parseConfigsFromText(combinedText);
   const byHash = new Map<string, ParsedConfig>();
-  for (const c of parsed) {
+  for (const c of allParsed) {
     if (!byHash.has(c.hash)) byHash.set(c.hash, c);
   }
-  const unique = [...byHash.values()];
+  const configs = [...byHash.values()];
 
-  logger.info('scrape: parsed', { total: parsed.length, unique: unique.length });
-  return unique;
+  logger.info('scrape: parsed', { total: allParsed.length, unique: configs.length });
+  return { configs, perSource };
 }

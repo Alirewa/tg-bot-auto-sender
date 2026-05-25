@@ -36,6 +36,8 @@ export interface ScrapeProgressEvent {
 
 export interface ScrapeOptions {
   onProgress?: (e: ScrapeProgressEvent) => void;
+  /** Limit scrape to specific source IDs. Omit to scrape all enabled sources. */
+  sourceIds?: number[];
 }
 
 export interface ScrapeResult {
@@ -63,7 +65,17 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
 
   try {
     opts.onProgress?.({ phase: 'fetching' });
-    const parsed = await scrapeAll();
+    const { configs: parsed, perSource } = await scrapeAll(opts.sourceIds);
+    if (perSource.length > 0) {
+      logger.info('scrape: per-source results', {
+        sources: perSource.map((r) => ({
+          id: r.source.id,
+          url: r.source.url.slice(0, 60),
+          parsed: r.parsed,
+          error: r.error,
+        })),
+      });
+    }
     opts.onProgress?.({ phase: 'parsing', scraped: parsed.length });
 
     // Filter against permanent dedup set.

@@ -1,7 +1,15 @@
 import { SubsRepo } from '../database/repositories';
 
+export interface Source {
+  id: number;
+  url: string;
+}
+
 // Dynamic source list — admin manages it via /addsub /delsub /listsubs.
-// Seeded with two default URLs on first DB migration (see database/migrations.ts).
+export function getActiveSources(): Source[] {
+  return SubsRepo.listEnabled().map((s) => ({ id: s.id, url: s.url }));
+}
+
 export function getActiveSourceUrls(): string[] {
-  return SubsRepo.listEnabled().map((s) => s.url);
+  return getActiveSources().map((s) => s.url);
 }
