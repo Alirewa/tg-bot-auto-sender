@@ -10,6 +10,48 @@ import { renameConfig } from '../utils/renamer';
 // Maximum config length before truncation (Telegram message limit = 4096 chars).
 const MAX_CONFIG_LENGTH = 3800;
 
+// ---------------------------------------------------------------------------
+// Small-caps converter (a–z only; non-alpha chars pass through unchanged)
+// ---------------------------------------------------------------------------
+const SMALL_CAPS: Record<string, string> = {
+  a: 'ᴀ', b: 'ʙ', c: 'ᴄ', d: 'ᴅ', e: 'ᴇ', f: 'ꜰ', g: 'ɢ', h: 'ʜ', i: 'ɪ',
+  j: 'ᴊ', k: 'ᴋ', l: 'ʟ', m: 'ᴍ', n: 'ɴ', o: 'ᴏ', p: 'ᴘ', q: 'Q', r: 'ʀ',
+  s: 'ꜱ', t: 'ᴛ', u: 'ᴜ', v: 'ᴠ', w: 'ᴡ', x: 'x', y: 'ʏ', z: 'ᴢ',
+};
+
+function toSmallCaps(text: string): string {
+  return text
+    .toLowerCase()
+    .split('')
+    .map((ch) => SMALL_CAPS[ch] ?? ch)
+    .join('');
+}
+
+// Country code → full English name (most common VPN server countries)
+const COUNTRY_NAMES: Record<string, string> = {
+  AF: 'Afghanistan', AL: 'Albania', AM: 'Armenia', AT: 'Austria', AU: 'Australia',
+  AZ: 'Azerbaijan', BA: 'Bosnia', BE: 'Belgium', BG: 'Bulgaria', BR: 'Brazil',
+  BY: 'Belarus', CA: 'Canada', CH: 'Switzerland', CL: 'Chile', CN: 'China',
+  CZ: 'Czechia', DE: 'Germany', DK: 'Denmark', EE: 'Estonia', ES: 'Spain',
+  FI: 'Finland', FR: 'France', GB: 'UK', GE: 'Georgia', GR: 'Greece',
+  HK: 'Hong Kong', HR: 'Croatia', HU: 'Hungary', ID: 'Indonesia', IE: 'Ireland',
+  IL: 'Israel', IN: 'India', IR: 'Iran', IT: 'Italy', JP: 'Japan',
+  KR: 'South Korea', KZ: 'Kazakhstan', LT: 'Lithuania', LU: 'Luxembourg',
+  LV: 'Latvia', MD: 'Moldova', MK: 'North Macedonia', MX: 'Mexico', MY: 'Malaysia',
+  NL: 'Netherlands', NO: 'Norway', NZ: 'New Zealand', PL: 'Poland', PT: 'Portugal',
+  RO: 'Romania', RS: 'Serbia', RU: 'Russia', SE: 'Sweden', SG: 'Singapore',
+  SI: 'Slovenia', SK: 'Slovakia', TH: 'Thailand', TR: 'Turkey', TW: 'Taiwan',
+  UA: 'Ukraine', US: 'United States', UZ: 'Uzbekistan', VN: 'Vietnam',
+  ZA: 'South Africa', XX: 'Unknown',
+};
+
+/** Returns the full country name for a 2-letter ISO code, falling back to the code itself. */
+function countryName(code: string): string {
+  return COUNTRY_NAMES[code.toUpperCase()] ?? code;
+}
+
+// ---------------------------------------------------------------------------
+
 interface TelegramApiError extends Error {
   response?: {
     error_code?: number;
@@ -57,34 +99,35 @@ function renderLabel(template: string, c: ValidatedConfig, n: number): string {
 }
 
 /**
- * Builds the Telegram HTML message with an enhanced, premium-looking format.
+ * Builds the Telegram message in the compact format:
+ *
+ *   #v2ray
+ *
+ *   `vless://…#[🇮🇷] @channel`
+ *
+ *   ᴄᴏᴜɴᴛʀʏ: #ɪʀᴀɴ(🇮🇷)  @channel
  */
 function buildMessage(c: ValidatedConfig, renamedRaw: string): string {
-  // Truncate very long configs before wrapping so the message stays under 4096 chars.
+  // Truncate very long configs so the message stays under Telegram's 4096-char limit.
   const truncated =
     renamedRaw.length > MAX_CONFIG_LENGTH ? renamedRaw.slice(0, MAX_CONFIG_LENGTH) : renamedRaw;
   const body = htmlEscape(truncated);
 
-  const proto = c.protocol.toUpperCase();
-  const country = c.country || 'Unknown';
-  const ping = `${c.latencyMs}ms`;
+  // Resolve channel handle from the live DB setting so /setchannel is respected.
+  const liveChannel = getPublishChannel();
+  const channelHandle = liveChannel.startsWith('@') ? liveChannel : `@${liveChannel}`;
 
-  // Strip @ from channel handle for the hashtag, keep @ for the join line.
-  const channelTag = config.publishChannelHandle.replace(/^@/, '');
-  const channelHandle = config.publishChannelHandle.startsWith('@')
-    ? config.publishChannelHandle
-    : `@${config.publishChannelHandle}`;
+  // Country line: small-caps label + small-caps country name as hashtag + flag
+  const name = countryName(c.country || 'XX');
+  const nameTag = toSmallCaps(name).replace(/\s+/g, ''); // e.g. ɪʀᴀɴ
+  const countryLine = `${toSmallCaps('country')}: #${nameTag}(${c.flag})  ${channelHandle}`;
 
   return [
-    '━━━━━━━━━━━━━━━━━━━━━━━',
-    `${c.flag} <b>${country}</b>  ⚡ <b>${proto}</b>`,
-    `📶 Ping: <b>${ping}</b>  🟢 Online`,
-    '━━━━━━━━━━━━━━━━━━━━━━━',
+    `#${c.protocol}`,
     '',
     `<code>${body}</code>`,
     '',
-    `🔗 Join: ${channelHandle}`,
-    `#config #v2ray #vpn #${channelTag} #${c.protocol}`,
+    countryLine,
   ].join('\n');
 }
 
