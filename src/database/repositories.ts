@@ -74,6 +74,15 @@ export const ConfigRepo = {
       .run(cutoff);
     return res.changes;
   },
+
+  /** Delete every config currently in 'queued' status from the DB.
+   *  Used by the "clear queue" admin action so the queue doesn't get
+   *  reloaded on the next restart, and fresh scraping can re-discover configs. */
+  deleteAllQueued(): number {
+    const db = getDb();
+    const res = db.prepare(`DELETE FROM configs WHERE status = 'queued'`).run();
+    return res.changes;
+  },
 };
 
 // ----------------------- stats -----------------------

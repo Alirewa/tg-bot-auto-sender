@@ -73,7 +73,7 @@ const config: AppConfig = {
   validationConcurrency: tuned.validationConcurrency,
   maxConfigsPerCycle: tuned.maxConfigsPerCycle,
   publishCron: optional('PUBLISH_CRON', '* * * * *'),
-  scrapeCron: optional('SCRAPE_CRON', '*/10 * * * *'),
+  scrapeCron: optional('SCRAPE_CRON', '0 * * * *'),
   dbPath: path.resolve(optional('DB_PATH', './data/bot.sqlite')),
   logLevel: optional('LOG_LEVEL', 'info'),
   // Subscription files
