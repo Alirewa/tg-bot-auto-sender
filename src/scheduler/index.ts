@@ -17,6 +17,10 @@ let publishTask: ScheduledTask | null = null;
 let scrapeTask: ScheduledTask | null = null;
 let scraping = false;
 let publishing = false;
+
+export function isScraping(): boolean {
+  return scraping;
+}
 // Throttle the "auto_send is OFF" warning to once per 5 minutes so it
 // appears in logs at warn level without flooding them.
 let lastAutoSendWarnMs = 0;
