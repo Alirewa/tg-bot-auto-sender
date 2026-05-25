@@ -10,6 +10,8 @@ import { Telegraf } from 'telegraf';
 import { ParsedConfig, ValidatedConfig } from '../types';
 import { generateAndWriteSubs } from '../subscriptions';
 import { getGithubPublisher } from '../github';
+import { findXrayBinary, xrayProbe } from '../validator/xray';
+import pLimit from 'p-limit';
 
 let publishTask: ScheduledTask | null = null;
 let scrapeTask: ScheduledTask | null = null;
@@ -334,6 +336,90 @@ export function stopScheduler(): void {
  * Only configs that respond within 1 second survive — the rest are marked dead.
  * Produces a much smaller but much higher-quality queue.
  */
+/**
+ * Validate queued configs using a real xray subprocess.
+ * Routes an HTTP request through each config's VPN — only configs that
+ * successfully proxy the request survive in the queue.
+ *
+ * This is the gold-standard check: it proves the UUID/password is valid
+ * and the server actually routes traffic, not just that the port is open.
+ *
+ * Concurrency is low (default 5) because each check spawns a real process.
+ */
+export async function validateWithXray(
+  opts: ScrapeOptions = {},
+): Promise<{ xrayFound: boolean; revalidated: number; alive: number }> {
+  const xrayBin = findXrayBinary();
+  if (!xrayBin) {
+    return { xrayFound: false, revalidated: 0, alive: 0 };
+  }
+
+  const XRAY_CONCURRENCY = 5;
+  const XRAY_TIMEOUT_MS = 10_000;
+
+  const rows = ConfigRepo.loadQueued();
+  if (rows.length === 0) {
+    return { xrayFound: true, revalidated: 0, alive: 0 };
+  }
+
+  logger.info('xray-validate: starting', {
+    total: rows.length,
+    concurrency: XRAY_CONCURRENCY,
+    timeoutMs: XRAY_TIMEOUT_MS,
+  });
+
+  const limit = pLimit(XRAY_CONCURRENCY);
+  let done = 0;
+  let aliveCount = 0;
+  const aliveRows: typeof rows = [];
+
+  opts.onProgress?.({ phase: 'validating', total: rows.length, done: 0, alive: 0 });
+
+  await Promise.all(
+    rows.map((r) =>
+      limit(async () => {
+        const c: ParsedConfig = {
+          hash: r.hash,
+          raw: r.raw,
+          protocol: r.protocol,
+          host: r.host,
+          port: r.port,
+        };
+        const result = await xrayProbe(c, xrayBin, XRAY_TIMEOUT_MS);
+        done++;
+        if (result.alive) {
+          aliveCount++;
+          aliveRows.push(r);
+        } else {
+          ConfigRepo.markDead(r.hash);
+        }
+        opts.onProgress?.({ phase: 'validating', total: rows.length, done, alive: aliveCount });
+      }),
+    ),
+  );
+
+  // Rebuild queue from survivors only
+  const aliveValidated: ValidatedConfig[] = aliveRows.map((r) => {
+    const code = r.country ?? 'XX';
+    return {
+      hash: r.hash, raw: r.raw, protocol: r.protocol,
+      host: r.host, port: r.port,
+      latencyMs: r.latency_ms ?? 0,
+      country: code,
+      flag: code.length === 2
+        ? String.fromCodePoint(...[...code.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65))
+        : '🏳️',
+    };
+  });
+
+  queue.clear();
+  queue.enqueueMany(aliveValidated);
+
+  opts.onProgress?.({ phase: 'done', total: rows.length, alive: aliveCount });
+  logger.info('xray-validate: done', { revalidated: rows.length, alive: aliveCount });
+  return { xrayFound: true, revalidated: rows.length, alive: aliveCount };
+}
+
 export async function validateQueueStrict(
   opts: ScrapeOptions = {},
 ): Promise<{ revalidated: number; alive: number }> {
