@@ -15,9 +15,11 @@ import { queue } from '../scheduler/queue';
 import {
   forceValidateQueue,
   validateQueueStrict,
+  validateWithXray,
   runScrapeCycle,
   ScrapeProgressEvent,
 } from '../scheduler';
+import { findXrayBinary } from '../validator/xray';
 
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
@@ -153,21 +155,30 @@ function templateMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 }
 
 function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
+  const xrayInstalled = !!findXrayBinary();
   const text = [
     '<b>🔍 Scan</b>',
     '',
     `Queue: <b>${queue.size()}</b> configs`,
+    `xray: <b>${xrayInstalled ? '✅ installed' : '❌ not found'}</b>`,
     '',
     '⏳ <b>Scrape now</b> — fetch new configs from all sources',
-    '♻️ <b>Re-check</b> — re-validate current queue (2500ms timeout)',
+    '♻️ <b>Re-check</b> — re-validate current queue (2500ms)',
     '✅ <b>Validate strict</b> — keep only configs with ping &lt;1000ms',
+    `🧪 <b>Xray test</b> — ${xrayInstalled ? 'route real HTTP through each config (gold standard)' : 'install xray first (see below)'}`,
     '🗑 <b>Clear queue</b> — empty queue completely',
+    ...(xrayInstalled ? [] : [
+      '',
+      '⚠️ To enable Xray testing, run on server:',
+      '<code>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</code>',
+    ]),
   ].join('\n');
 
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('⏳ Scrape now', 'act:scrape')],
     [Markup.button.callback('♻️ Re-check queue', 'act:check')],
     [Markup.button.callback('✅ Validate strict (<1000ms)', 'act:validate_strict')],
+    [Markup.button.callback(xrayInstalled ? '🧪 Xray test (real VPN check)' : '🧪 Xray — not installed', 'act:validate_xray')],
     [Markup.button.callback('🗑 Clear queue', 'act:clear_queue')],
     [Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
@@ -572,6 +583,47 @@ export function registerCommands(bot: Telegraf): void {
     await forceValidateQueue({ onProgress });
   }
 
+  async function runXrayValidateWithProgress(ctx: Context): Promise<void> {
+    const xrayBin = findXrayBinary();
+    if (!xrayBin) {
+      await ctx.reply(
+        '❌ <b>xray not installed</b>\n\nInstall it on the server:\n<code>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</code>',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+
+    const before = queue.size();
+    const header = '🧪 <b>Xray real-VPN test</b>';
+    const msg = await ctx.reply(
+      `${header}\n\n` +
+        `Testing <b>${before}</b> configs by actually routing HTTP through each.\n` +
+        `⚠️ This takes longer (~5 concurrent, 10s each). Please wait…`,
+      { parse_mode: 'HTML' },
+    );
+    const messageId = (msg as { message_id: number }).message_id;
+    const onProgress = makeProgressEditor(ctx, messageId, header);
+
+    const result = await validateWithXray({ onProgress });
+
+    ctx.telegram
+      .editMessageText(
+        ctx.chat!.id,
+        messageId,
+        undefined,
+        `${header}\n\n` +
+          `✅ <b>Done.</b>\n\n` +
+          `Tested:    ${result.revalidated}\n` +
+          `Working:   <b>${result.alive}</b> (real HTTP routed OK)\n` +
+          `Removed:   ${result.revalidated - result.alive} (dead / wrong UUID)`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Scan', 'act:scan')]]).reply_markup,
+        },
+      )
+      .catch(() => {});
+  }
+
   async function runValidateStrictWithProgress(ctx: Context, header: string): Promise<void> {
     const before = queue.size();
     const msg = await ctx.reply(
@@ -779,6 +831,11 @@ export function registerCommands(bot: Telegraf): void {
         case 'validate_strict':
           await ctx.answerCbQuery('Validating with 1000ms timeout...');
           await runValidateStrictWithProgress(ctx, '<b>✅ Validate strict (&lt;1000ms)</b>');
+          return;
+
+        case 'validate_xray':
+          await ctx.answerCbQuery('Starting xray validation...');
+          await runXrayValidateWithProgress(ctx);
           return;
 
         case 'add_sub':
