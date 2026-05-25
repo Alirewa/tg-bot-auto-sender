@@ -17,11 +17,11 @@ import {
   validateQueueStrict,
   validateWithXray,
   runScrapeCycle,
-  isScraping,
   ScrapeProgressEvent,
 } from '../scheduler';
 import { findXrayBinary } from '../validator/xray';
 import { getActiveSources } from '../scraper/sources';
+import { checkSourcesHealth } from '../scraper';
 
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
@@ -127,6 +127,7 @@ function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
       Markup.button.callback('🟢/⚪️ Toggle', 'act:toggle_sub'),
       Markup.button.callback('🔄 Refresh', 'act:subs'),
     ],
+    [Markup.button.callback('🩺 Health check sources', 'act:source_health')],
     [Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
@@ -623,16 +624,9 @@ export function registerCommands(bot: Telegraf): void {
     header: string,
     sourceIds?: number[],
   ): Promise<void> {
-    // Guard: if a cycle is already running (e.g. automatic startup scrape),
-    // tell the user instead of silently hanging on "⏳ Starting...".
-    if (isScraping()) {
-      await ctx.reply(
-        `${header}\n\n⏳ <b>A scrape cycle is already running.</b>\n\nPlease wait for it to finish — this usually takes 1–5 minutes.\nThe queue will update automatically when it's done.`,
-        { parse_mode: 'HTML', reply_markup: backToMenuKb() },
-      );
-      return;
-    }
-
+    // Send a live-updating progress message.
+    // If a cycle is already running, the onProgress callback is registered as a
+    // subscriber — it will receive all remaining events from the active cycle.
     const msg = await ctx.reply(`${header}\n\n⏳ Starting...`, { parse_mode: 'HTML' });
     const messageId = (msg as { message_id: number }).message_id;
     const onProgress = makeProgressEditor(ctx, messageId, header);
@@ -1014,6 +1008,52 @@ export function registerCommands(bot: Telegraf): void {
             { parse_mode: 'HTML' },
           );
           return;
+
+        case 'source_health': {
+          await ctx.answerCbQuery('Checking sources...');
+          const checking = await ctx.editMessageText(
+            '🩺 <b>Source Health Check</b>\n\n⏳ Fetching all sources... please wait.',
+            { parse_mode: 'HTML' },
+          );
+          void checking;
+
+          const { results, autoDisabled } = await checkSourcesHealth();
+
+          const lines = results.map((r) => {
+            const icon = r.status === 'ok' ? '✅' : r.status === 'empty' ? '⚠️' : '❌';
+            const truncUrl = r.url.length > 45 ? r.url.slice(0, 45) + '…' : r.url;
+            const disabled = !r.enabled && r.status !== 'ok' ? ' <i>(disabled)</i>' : '';
+            const detail =
+              r.status === 'ok'
+                ? `${r.configCount} configs`
+                : r.status === 'empty'
+                ? 'no configs found'
+                : `error: ${(r.error ?? '').slice(0, 60)}`;
+            return `${icon} <b>#${r.id}</b>${disabled}\n   <code>${escapeHtml(truncUrl)}</code>\n   ${escapeHtml(detail)}`;
+          });
+
+          const summary =
+            autoDisabled > 0
+              ? `\n⚠️ <b>${autoDisabled}</b> source(s) auto-disabled (broken or empty).`
+              : '\n✅ All sources look healthy.';
+
+          const resultText = [
+            '🩺 <b>Source Health Check</b>',
+            '',
+            ...lines,
+            summary,
+          ].join('\n');
+
+          await ctx.telegram
+            .editMessageText(ctx.chat!.id, (checking as { message_id: number }).message_id, undefined, resultText, {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('🔗 Back to Sources', 'act:subs')],
+              ]).reply_markup,
+            })
+            .catch(() => ctx.reply(resultText, { parse_mode: 'HTML', reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup }));
+          return;
+        }
 
         case 'clean_db': {
           const deleted = ConfigRepo.deleteDeadAndFailed();
