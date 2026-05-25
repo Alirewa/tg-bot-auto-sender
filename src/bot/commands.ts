@@ -157,26 +157,16 @@ function templateMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 
 function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const xrayInstalled = !!findXrayBinary();
-  const autoXray = SettingsRepo.getBool('auto_xray', false);
   const queueSize = queue.size();
-
-  const xrayStatus = xrayInstalled
-    ? `✅ installed — Auto-Xray ${autoXray ? '🟢 ON' : '⚪️ OFF'}`
-    : '❌ not found';
 
   const text = [
     '<b>🔍 Scan</b>',
     '',
     `Queue:  <b>${queueSize}</b> configs`,
-    `Xray:   <b>${xrayStatus}</b>`,
+    `Xray:   <b>${xrayInstalled ? '✅ installed — runs after every scrape' : '❌ not found'}</b>`,
     '',
-    '⏳ <b>Scrape</b> — fetch fresh configs (you choose which source)',
-    `🧪 <b>Test queue</b> — ${xrayInstalled
-      ? 'route real HTTP through each VPN and remove broken ones'
-      : 'TCP ping every config in queue (install xray for real testing)'}`,
-    `🤖 <b>Auto-Xray ${autoXray ? 'ON' : 'OFF'}</b> — ${autoXray
-      ? 'xray sweep runs after every scrape automatically'
-      : 'tap to run xray sweep after every scrape automatically'}`,
+    '⏳ <b>Scrape</b> — fetch fresh configs, then xray-test automatically',
+    `🧪 <b>Test queue</b> — ${xrayInstalled ? 'xray-test current queue on demand' : 'TCP-test current queue (install xray for real testing)'}`,
     ...(xrayInstalled ? [] : [
       '',
       '⚠️ Install xray for real VPN testing:',
@@ -190,10 +180,6 @@ function scanMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const kb = Markup.inlineKeyboard([
     [Markup.button.callback('⏳ Scrape now', 'act:scrape')],
     [Markup.button.callback(testLabel, testAction)],
-    [Markup.button.callback(
-      autoXray ? '🤖 Auto-Xray: 🟢 ON' : '🤖 Auto-Xray: ⚪️ OFF',
-      'act:toggle_auto_xray',
-    )],
     [
       Markup.button.callback('🗑 Clear queue', 'act:clear_queue'),
       Markup.button.callback('🧹 Clean DB', 'act:clean_db'),
@@ -1005,17 +991,6 @@ export function registerCommands(bot: Telegraf): void {
             { parse_mode: 'HTML' },
           );
           return;
-
-        case 'toggle_auto_xray': {
-          const current = SettingsRepo.getBool('auto_xray', false);
-          SettingsRepo.setBool('auto_xray', !current);
-          await ctx.answerCbQuery(
-            !current ? '🤖 Auto-Xray enabled — next scrape will include xray sweep' : '⚪️ Auto-Xray disabled',
-          );
-          const sv = scanMenu();
-          await ctx.editMessageText(sv.text, { parse_mode: 'HTML', reply_markup: sv.keyboard });
-          return;
-        }
 
         case 'clean_db': {
           const deleted = ConfigRepo.deleteDeadAndFailed();
