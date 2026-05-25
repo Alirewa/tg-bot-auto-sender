@@ -1,6 +1,6 @@
 import pLimit from 'p-limit';
 import { ParsedConfig, ValidatedConfig } from '../types';
-import { tcpProbe } from './tcp';
+import { smartProbe } from './probe';
 import { resolveCountry } from '../geoip';
 import config from '../utils/config';
 import logger from '../utils/logger';
@@ -44,7 +44,7 @@ export async function validateStreaming(
 
   const tasks = configs.map((c) =>
     limit(async () => {
-      const probe = await tcpProbe(c.host, c.port, config.tcpTimeoutMs);
+      const probe = await smartProbe(c, config.tcpTimeoutMs);
       done++;
       if (!probe.alive) {
         deadCount++;
