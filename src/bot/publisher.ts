@@ -123,9 +123,9 @@ function buildMessage(c: ValidatedConfig, renamedRaw: string, n: number): string
   const countryLine = `${toSmallCaps('country')}: #${nameTag}(${c.flag})  ${channelHandle}`;
 
   return [
-    `Config #${n}`,
     `<pre>${body}</pre>`,
     '',
+    `Config #${n}`,
     countryLine,
   ].join('\n');
 }
