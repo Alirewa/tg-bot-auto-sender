@@ -94,6 +94,18 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
           error: r.error,
         })),
       });
+      // Persist per-source stats so the Sources menu can display them.
+      SettingsRepo.setString(
+        'last_scrape_per_source',
+        JSON.stringify(
+          perSource.map((r) => ({
+            id: r.source.id,
+            parsed: r.parsed,
+            error: r.error ?? null,
+          })),
+        ),
+      );
+      SettingsRepo.setString('last_scrape_at', new Date().toISOString());
     }
     broadcast({ phase: 'parsing', scraped: parsed.length });
 
@@ -233,6 +245,15 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
             alive: xrayResult.alive,
             removed: xrayResult.revalidated - xrayResult.alive,
           });
+          // Persist xray result for Sources / Scan menu display.
+          SettingsRepo.setString(
+            'last_xray_result',
+            JSON.stringify({
+              tcpAlive: aliveConfigs.length,
+              xrayAlive: xrayResult.alive,
+              at: new Date().toISOString(),
+            }),
+          );
         } catch (err) {
           logger.warn('scrape: xray sweep failed', {
             error: err instanceof Error ? err.message : String(err),

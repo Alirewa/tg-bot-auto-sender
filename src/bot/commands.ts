@@ -97,16 +97,53 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 
 function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const list = SubsRepo.list();
+
+  // Load last-scrape per-source stats (stored after each cycle).
+  type SourceStat = { id: number; parsed: number; error: string | null };
+  let lastStats: SourceStat[] = [];
+  try {
+    lastStats = JSON.parse(SettingsRepo.getString('last_scrape_per_source', '[]')) as SourceStat[];
+  } catch { /* ignore parse errors */ }
+
+  const lastXrayRaw = SettingsRepo.getString('last_xray_result', '');
+  let xraySummary = '';
+  try {
+    if (lastXrayRaw) {
+      const xr = JSON.parse(lastXrayRaw) as { tcpAlive: number; xrayAlive: number; at: string };
+      const when = xr.at ? xr.at.slice(0, 16).replace('T', ' ') : '';
+      xraySummary = `\n<b>Last xray sweep</b> (${when}): TCP alive <b>${xr.tcpAlive}</b> → Xray confirmed <b>${xr.xrayAlive}</b>`;
+    }
+  } catch { /* ignore */ }
+
+  const statMap = new Map(lastStats.map((s) => [s.id, s]));
+
   const lines = list.length
-    ? list
-        .map(
-          (s) =>
-            `${s.enabled ? '🟢' : '⚪️'} <b>#${s.id}</b> <code>${escapeHtml(s.url)}</code>`,
-        )
-        .join('\n')
+    ? list.map((s) => {
+        const stat = statMap.get(s.id);
+        const icon = s.enabled ? '🟢' : '⚪️';
+        const truncUrl = s.url.length > 55 ? s.url.slice(0, 55) + '…' : s.url;
+        let statStr = '';
+        if (stat) {
+          if (stat.error) {
+            statStr = ` <i>— ❌ error</i>`;
+          } else {
+            statStr = ` <i>— ${stat.parsed} configs</i>`;
+          }
+        }
+        return `${icon} <b>#${s.id}</b>${statStr}\n   <code>${escapeHtml(truncUrl)}</code>`;
+      }).join('\n')
     : '— no sources yet.';
 
-  const text = ['<b>🔗 Subscription sources</b>', '', lines].join('\n');
+  const lastAt = SettingsRepo.getString('last_scrape_at', '');
+  const lastAtStr = lastAt ? `\n<i>Last scrape: ${lastAt.slice(0, 16).replace('T', ' ')}</i>` : '';
+
+  const text = [
+    '<b>🔗 Subscription sources</b>',
+    lastAtStr,
+    xraySummary,
+    '',
+    lines,
+  ].filter(Boolean).join('\n');
 
   const kb = Markup.inlineKeyboard([
     [
