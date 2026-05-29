@@ -572,8 +572,10 @@ export interface SourceXrayStats {
   url: string;
   enabled: boolean;
   configCount: number;   // configs parsed from source
-  sampled: number;       // how many were xray-tested
+  sampled: number;       // how many were attempted (includes skipped)
+  xrayTested: number;    // how many were actually tested (excl. skipped REALITY etc.)
   xrayAlive: number;     // how many passed xray
+  xraySkipped: number;   // REALITY / WireGuard — untestable, not counted as failed
   fetchError?: string;
   checkedAt: string;
 }
@@ -584,7 +586,7 @@ export interface SourceXrayStats {
  * Returns per-source stats so the caller can display them.
  */
 export async function testSourcesWithXray(
-  maxSamplePerSource = 5,
+  maxSamplePerSource = 20,
 ): Promise<{ results: SourceXrayStats[]; xrayFound: boolean }> {
   const xrayBin = findXrayBinary();
   if (!xrayBin) return { results: [], xrayFound: false };
@@ -594,7 +596,7 @@ export async function testSourcesWithXray(
   const { parseConfigsFromText } = await import('../scraper/parser');
 
   const all = SR.list();
-  const XRAY_TIMEOUT = 8_000;
+  const XRAY_TIMEOUT = 12_000;  // 12s — generous timeout for real VPN test
   const CONCURRENCY = 3;
   const limit = pLimit(CONCURRENCY);
   const results: SourceXrayStats[] = [];
@@ -602,7 +604,9 @@ export async function testSourcesWithXray(
   for (const sub of all) {
     let configCount = 0;
     let sampled = 0;
+    let xrayTested = 0;
     let xrayAlive = 0;
+    let xraySkipped = 0;
     let fetchError: string | undefined;
 
     try {
@@ -616,13 +620,20 @@ export async function testSourcesWithXray(
       const parsed = parseConfigsFromText(text);
       configCount = parsed.length;
 
-      const sample = parsed.slice(0, maxSamplePerSource);
+      // Shuffle so the sample covers different servers, not just the first N.
+      const shuffled = [...parsed].sort(() => Math.random() - 0.5);
+      const sample = shuffled.slice(0, maxSamplePerSource);
       sampled = sample.length;
 
       const xrayTasks = sample.map((c) =>
         limit(async () => {
           const r = await xrayProbe(c, xrayBin, XRAY_TIMEOUT);
-          if (r.alive) xrayAlive++;
+          if (r.skipped) {
+            xraySkipped++;
+          } else {
+            xrayTested++;
+            if (r.alive) xrayAlive++;
+          }
         }),
       );
       await Promise.all(xrayTasks);
@@ -636,7 +647,9 @@ export async function testSourcesWithXray(
       enabled: sub.enabled === 1,
       configCount,
       sampled,
+      xrayTested,
       xrayAlive,
+      xraySkipped,
       fetchError,
       checkedAt: new Date().toISOString(),
     });
@@ -645,7 +658,9 @@ export async function testSourcesWithXray(
       id: sub.id,
       configCount,
       sampled,
+      xrayTested,
       xrayAlive,
+      xraySkipped,
       fetchError,
     });
   }

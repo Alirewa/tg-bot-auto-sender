@@ -33,6 +33,8 @@ export interface ProbeResult {
   alive: boolean;
   latencyMs: number;
   error?: string;
+  /** true when the config type cannot be tested (REALITY, WireGuard) — not a failure */
+  skipped?: boolean;
 }
 
 export interface GeoResult {

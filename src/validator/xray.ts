@@ -120,6 +120,10 @@ function qs(raw: string): URLSearchParams {
   return new URLSearchParams(fi >= 0 ? raw.slice(qi + 1, fi) : raw.slice(qi + 1));
 }
 
+function decodePath(raw: string): string {
+  try { return decodeURIComponent(raw || '/'); } catch { return raw || '/'; }
+}
+
 function streamSettings(
   network: string,
   security: string,
@@ -129,6 +133,7 @@ function streamSettings(
   fallbackHost: string,
 ): Record<string, unknown> {
   const ss: Record<string, unknown> = { network };
+  const effectiveHost = wsHost || sni || fallbackHost;
 
   if (security === 'tls') {
     ss['security'] = 'tls';
@@ -143,12 +148,29 @@ function streamSettings(
 
   if (network === 'ws') {
     ss['wsSettings'] = {
-      path: (() => { try { return decodeURIComponent(wsPath || '/'); } catch { return wsPath || '/'; } })(),
-      headers: { Host: wsHost || sni || fallbackHost },
+      path: decodePath(wsPath),
+      headers: { Host: effectiveHost },
     };
   } else if (network === 'grpc') {
     ss['grpcSettings'] = { serviceName: wsPath || '' };
+  } else if (network === 'httpupgrade' || network === 'http') {
+    // httpUpgrade transport — used widely in CDN-based free configs.
+    ss['httpUpgradeSettings'] = {
+      path: decodePath(wsPath),
+      host: effectiveHost,
+    };
+  } else if (network === 'xhttp' || network === 'splithttp') {
+    ss['xhttpSettings'] = {
+      path: decodePath(wsPath),
+      host: effectiveHost,
+    };
+  } else if (network === 'h2') {
+    ss['h2Settings'] = {
+      path: decodePath(wsPath),
+      host: [effectiveHost].filter(Boolean),
+    };
   }
+  // tcp: no extra settings needed
 
   return ss;
 }
@@ -310,7 +332,8 @@ export async function xrayProbe(
 
   const outbound = buildOutbound(c);
   if (!outbound) {
-    return { alive: false, latencyMs: 0, error: 'unsupported-or-skipped' };
+    // REALITY, WireGuard, or unknown protocol — cannot probe, not a failure.
+    return { alive: false, latencyMs: 0, skipped: true, error: 'unsupported-or-skipped' };
   }
 
   let socksPort: number;
