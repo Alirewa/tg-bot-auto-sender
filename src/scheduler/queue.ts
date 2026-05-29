@@ -37,6 +37,11 @@ class PublishQueue {
   has(hash: string): boolean {
     return this.items.some((c) => c.hash === hash);
   }
+
+  /** Remove a single config from the in-memory queue by hash. */
+  remove(hash: string): void {
+    this.items = this.items.filter((c) => c.hash !== hash);
+  }
 }
 
 function rowToValidated(row: ConfigRow): ValidatedConfig {

@@ -25,10 +25,18 @@ export const ConfigRepo = {
 
   insertValidated(c: ValidatedConfig): void {
     const db = getDb();
+    // UPSERT: insert new configs; for previously failed/dead ones update to queued
+    // with fresh latency + country. Configs already queued/posted are untouched.
     db.prepare(
-      `INSERT OR IGNORE INTO configs
+      `INSERT INTO configs
         (hash, raw, protocol, host, port, country, latency_ms, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+       ON CONFLICT(hash) DO UPDATE SET
+         status     = 'queued',
+         raw        = excluded.raw,
+         latency_ms = excluded.latency_ms,
+         country    = excluded.country
+       WHERE status IN ('failed', 'dead')`,
     ).run(c.hash, c.raw, c.protocol, c.host, c.port, c.country, c.latencyMs, Date.now());
   },
 

@@ -3,17 +3,13 @@ import { InlineKeyboardMarkup } from 'telegraf/typings/core/types/typegram';
 import config from '../utils/config';
 import { getPublishChannel } from './publisher';
 import logger from '../utils/logger';
-import { readRecentLogs, readLogsFiltered } from '../utils/logReader';
 import {
-  AnalyticsRepo,
   ConfigRepo,
   SettingsRepo,
-  StatsRepo,
   SubsRepo,
 } from '../database/repositories';
 import { queue } from '../scheduler/queue';
 import {
-  forceValidateQueue,
   validateQueueStrict,
   validateWithXray,
   runScrapeCycle,
@@ -61,12 +57,12 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const text = [
     '<b>tg-bot-auto-sender — admin panel</b>',
     '',
-    `Channel:       <code>${channelDisplay}</code>`,
-    `Auto-send:     <b>${autoSend ? 'ON 🟢' : 'OFF 🔴'}</b>`,
-    `Post counter:  <b>${counter}</b>`,
-    `Sub sources:   <b>${enabledSubs}/${totalSubs}</b> enabled`,
-    `Queue:         <b>${queue.size()}</b>`,
-    `Uptime:        <b>${formatUptime(Date.now() - startTimestamp)}</b>`,
+    `Channel:     <code>${channelDisplay}</code>`,
+    `Auto-send:   <b>${autoSend ? 'ON 🟢' : 'OFF 🔴'}</b>`,
+    `Counter:     <b>#${counter}</b>`,
+    `Sources:     <b>${enabledSubs}/${totalSubs}</b> enabled`,
+    `Queue:       <b>${queue.size()}</b>`,
+    `Uptime:      <b>${formatUptime(Date.now() - startTimestamp)}</b>`,
   ].join('\n');
 
   const kb = Markup.inlineKeyboard([
@@ -77,10 +73,6 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
       ),
     ],
     [
-      Markup.button.callback('📊 Stats', 'act:stats'),
-      Markup.button.callback('🏓 Ping', 'act:ping'),
-    ],
-    [
       Markup.button.callback('📢 Set Channel', 'act:set_channel'),
       Markup.button.callback('🧩 Template', 'act:template'),
     ],
@@ -89,12 +81,7 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
       Markup.button.callback('🔍 Scan', 'act:scan'),
     ],
     [
-      Markup.button.callback('📈 Analytics', 'act:analytics'),
       Markup.button.callback('📡 Sub links', 'act:sublink'),
-    ],
-    [
-      Markup.button.callback('📋 Publish logs', 'act:logs_publish'),
-      Markup.button.callback('📄 All logs', 'act:logs_all'),
     ],
     [
       Markup.button.callback('🔢 Reset counter', 'act:reset_counter'),
@@ -224,27 +211,6 @@ function scrapeSourceMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   return { text, keyboard: kb };
 }
 
-function statsText(): string {
-  const totalPosted = StatsRepo.get('total_posted');
-  const totalValidated = StatsRepo.get('total_validated');
-  const totalFailed = StatsRepo.get('total_failed');
-  const postedToday = StatsRepo.getPostedToday();
-  const dbQueued = ConfigRepo.countByStatus('queued');
-  const dbDead = ConfigRepo.countByStatus('dead');
-
-  return [
-    '<b>📊 Stats</b>',
-    '',
-    `🟢 Total posted:     <b>${totalPosted}</b>`,
-    `📅 Posted today:     <b>${postedToday}</b>`,
-    `🧪 Validated alive:  <b>${totalValidated}</b>`,
-    `❌ Failed:           <b>${totalFailed}</b>`,
-    `📥 Queue (RAM):      <b>${queue.size()}</b>`,
-    `💾 Queue (DB):       <b>${dbQueued}</b>`,
-    `🪦 Dead:             <b>${dbDead}</b>`,
-  ].join('\n');
-}
-
 function sublinkText(): string {
   const ghRepo = config.githubRepo;
   const ghBranch = config.githubBranch;
@@ -281,102 +247,6 @@ function sublinkText(): string {
     `SS:             <code>${base}/ss.txt</code>`,
     `WireGuard:      <code>${base}/wireguard.txt</code>`,
   ].join('\n');
-}
-
-function analyticsText(): string {
-  const summary = AnalyticsRepo.getSummaryLast24h();
-  if (summary.cycles === 0) {
-    return '<b>📊 Analytics</b>\n\nNo data yet — run a scrape cycle first.';
-  }
-
-  const totalPosted = StatsRepo.get('total_posted');
-  const healthyRatio =
-    summary.totalValidated > 0
-      ? Math.round((summary.totalAlive / summary.totalValidated) * 100)
-      : 0;
-  const publishSuccessRate =
-    summary.totalAlive > 0
-      ? Math.round((totalPosted / Math.max(totalPosted, 1)) * 100)
-      : 0;
-
-  return [
-    '<b>📊 Last 24h Analytics</b>',
-    '',
-    `📦 Cycles run:      <b>${summary.cycles}</b>`,
-    `🧪 Validated:       <b>${summary.totalValidated}</b>`,
-    `🟢 Alive total:     <b>${summary.totalAlive}</b>`,
-    `📉 Healthy ratio:   <b>${healthyRatio}%</b>`,
-    `🏆 Best protocol:   <b>${summary.bestProtocol ?? '—'}</b>`,
-    `🌍 Best country:    <b>${summary.bestCountry ?? '—'}</b>`,
-    `⚡ Avg latency:     <b>${summary.avgLatency !== null ? summary.avgLatency + 'ms' : '—'}</b>`,
-    `📬 Total published: <b>${totalPosted}</b>`,
-    `✅ Publish rate:    <b>${publishSuccessRate}%</b>`,
-  ].join('\n');
-}
-
-/** Formats recent log entries for display in Telegram. */
-function logsText(publishOnly = false): string {
-  const SKIP = new Set(['timestamp', 'level', 'message']);
-  const entries = publishOnly
-    ? readLogsFiltered('publish:', 20)
-    : readRecentLogs(20);
-
-  if (entries.length === 0) {
-    if (publishOnly) {
-      const autoSend = SettingsRepo.getBool('auto_send', true);
-      const qSize = queue.size();
-      const channel = getPublishChannel();
-      return [
-        '<b>📋 Publish Logs</b>',
-        '',
-        '⚠️ No publish events found in recent logs.',
-        '',
-        `Auto-send : ${autoSend ? '🟢 ON' : '🔴 OFF'}`,
-        `Queue     : <b>${qSize}</b> configs`,
-        `Channel   : <code>${channel || '⚠️ not set'}</code>`,
-        '',
-        ...(autoSend ? [] : ['➡️ Send /on to enable auto-send']),
-        ...(!channel ? ['➡️ Send /setchannel @yourchannel'] : []),
-        ...(qSize === 0 ? ['➡️ Send /forcescrape to fill the queue'] : []),
-        ...(autoSend && channel && qSize > 0
-          ? ['ℹ️ Everything looks configured. Update bot and check again in 1 minute.']
-          : []),
-      ].join('\n');
-    }
-    return (
-      '<b>📋 Recent Logs</b>\n\n' +
-      'No logs found yet.\n' +
-      'Run /forcescrape or wait for the next publish tick.'
-    );
-  }
-
-  const lines = entries.map((e) => {
-    const icon = e.level === 'error' ? '🔴' : e.level === 'warn' ? '🟡' : '🟢';
-    const ts = String(e.timestamp ?? '');
-    // ISO → HH:MM:SS
-    const time = ts.length >= 19 ? ts.slice(11, 19) : ts.slice(0, 8);
-    // collect extra meta fields
-    const meta: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(e)) {
-      if (!SKIP.has(k)) meta[k] = v;
-    }
-    const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
-    return `${icon} <code>${time}</code> ${escapeHtml(e.message + metaStr)}`;
-  });
-
-  const title = publishOnly
-    ? '<b>📋 Publish Logs</b> (last 20)\n\n'
-    : '<b>📋 Recent Logs</b> (last 20)\n\n';
-
-  let body = lines.join('\n');
-  // Keep well under 4096 chars
-  if (title.length + body.length > 3900) {
-    body = body.slice(-(3900 - title.length));
-    const cut = body.indexOf('\n');
-    if (cut > 0) body = body.slice(cut + 1);
-  }
-
-  return title + body;
 }
 
 function backToMenuKb(): InlineKeyboardMarkup {
@@ -493,18 +363,13 @@ export function registerCommands(bot: Telegraf): void {
       { command: 'on',          description: 'Enable auto-send' },
       { command: 'off',         description: 'Disable auto-send' },
       { command: 'forcescrape', description: 'Run scrape cycle now' },
-      { command: 'forcecheck',  description: 'Re-validate entire queue' },
-      { command: 'stats',       description: 'Overall statistics' },
-      { command: 'analytics',   description: '24-hour analytics' },
-      { command: 'logs',        description: 'Recent logs' },
       { command: 'sublink',     description: 'Subscription file links' },
       { command: 'listsubs',    description: 'List subscription sources' },
       { command: 'addsub',      description: 'Add source — /addsub https://...' },
       { command: 'delsub',      description: 'Remove source — /delsub <id>' },
       { command: 'template',    description: 'View / change post name template' },
       { command: 'resetcounter',description: 'Reset post counter to zero' },
-      { command: 'clearqueue',   description: 'Clear entire queue (with confirmation)' },
-      { command: 'ping',        description: 'Health check + uptime' },
+      { command: 'clearqueue',  description: 'Clear entire queue (with confirmation)' },
       { command: 'cancel',      description: 'Cancel current input prompt' },
     ])
     .catch((err) => {
@@ -517,19 +382,7 @@ export function registerCommands(bot: Telegraf): void {
   bot.help((ctx) => showMain(ctx));
   bot.command('menu', (ctx) => showMain(ctx));
 
-  bot.command('ping', async (ctx) => {
-    const sent = ctx.message?.date ? ctx.message.date * 1000 : Date.now();
-    const latency = Date.now() - sent;
-    await ctx.reply(
-      `🏓 pong\nlatency: <b>${latency}ms</b>\nuptime: <b>${formatUptime(Date.now() - startTimestamp)}</b>`,
-      { parse_mode: 'HTML' },
-    );
-  });
-
   bot.command('status', (ctx) => showMain(ctx));
-  bot.command('stats', async (ctx) =>
-    ctx.reply(statsText(), { parse_mode: 'HTML', reply_markup: backToMenuKb() }),
-  );
 
   bot.command('on', async (ctx) => {
     SettingsRepo.setBool('auto_send', true);
@@ -633,12 +486,7 @@ export function registerCommands(bot: Telegraf): void {
     await runScrapeCycle({ onProgress, sourceIds });
   }
 
-  async function runCheckWithProgress(ctx: Context, header: string): Promise<void> {
-    const msg = await ctx.reply(`${header}\n\n⏳ Starting...`, { parse_mode: 'HTML' });
-    const messageId = (msg as { message_id: number }).message_id;
-    const onProgress = makeProgressEditor(ctx, messageId, header);
-    await forceValidateQueue({ onProgress });
-  }
+
 
   async function runXrayValidateWithProgress(ctx: Context): Promise<void> {
     const xrayBin = findXrayBinary();
@@ -705,9 +553,6 @@ export function registerCommands(bot: Telegraf): void {
   bot.command('forcescrape', (ctx) =>
     runScrapeWithProgress(ctx, '<b>⏳ Scrape cycle</b>'),
   );
-  bot.command('forcecheck', (ctx) =>
-    runCheckWithProgress(ctx, '<b>♻️ Re-checking queue</b>'),
-  );
 
   bot.command('setchannel', async (ctx) => {
     const arg = stripCommand(ctx.message?.text ?? '').trim();
@@ -729,26 +574,6 @@ export function registerCommands(bot: Telegraf): void {
       parse_mode: 'HTML',
       link_preview_options: { is_disabled: true },
       reply_markup: backToMenuKb(),
-    });
-  });
-
-  bot.command('analytics', async (ctx) => {
-    await ctx.reply(analyticsText(), {
-      parse_mode: 'HTML',
-      reply_markup: backToMenuKb(),
-    });
-  });
-
-  bot.command('logs', async (ctx) => {
-    await ctx.reply(logsText(false), {
-      parse_mode: 'HTML',
-      reply_markup: Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📋 Publish only', 'act:logs_publish'),
-          Markup.button.callback('📄 All logs', 'act:logs_all'),
-        ],
-        [Markup.button.callback('⬅️ Main menu', 'act:menu')],
-      ]).reply_markup,
     });
   });
 
@@ -809,24 +634,6 @@ export function registerCommands(bot: Telegraf): void {
           await ctx.answerCbQuery('Auto-send OFF');
           await showMain(ctx, true);
           return;
-
-        case 'stats':
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(statsText(), {
-            parse_mode: 'HTML',
-            reply_markup: backToMenuKb(),
-          });
-          return;
-
-        case 'ping': {
-          await ctx.answerCbQuery();
-          const lat = Date.now() - (ctx.callbackQuery?.message?.date ?? 0) * 1000;
-          await ctx.editMessageText(
-            `🏓 pong\nlatency: <b>${lat}ms</b>\nuptime: <b>${formatUptime(Date.now() - startTimestamp)}</b>`,
-            { parse_mode: 'HTML', reply_markup: backToMenuKb() },
-          );
-          return;
-        }
 
         case 'subs': {
           await ctx.answerCbQuery();
@@ -959,46 +766,6 @@ export function registerCommands(bot: Telegraf): void {
             reply_markup: backToMenuKb(),
           });
           return;
-
-        case 'analytics':
-          await ctx.answerCbQuery();
-          await ctx.editMessageText(analyticsText(), {
-            parse_mode: 'HTML',
-            reply_markup: backToMenuKb(),
-          });
-          return;
-
-        case 'logs_publish': {
-          await ctx.answerCbQuery();
-          const logsKb = Markup.inlineKeyboard([
-            [
-              Markup.button.callback('📋 Publish only', 'act:logs_publish'),
-              Markup.button.callback('📄 All logs', 'act:logs_all'),
-            ],
-            [Markup.button.callback('⬅️ Main menu', 'act:menu')],
-          ]).reply_markup;
-          await ctx.editMessageText(logsText(true), {
-            parse_mode: 'HTML',
-            reply_markup: logsKb,
-          });
-          return;
-        }
-
-        case 'logs_all': {
-          await ctx.answerCbQuery();
-          const logsKb = Markup.inlineKeyboard([
-            [
-              Markup.button.callback('📋 Publish only', 'act:logs_publish'),
-              Markup.button.callback('📄 All logs', 'act:logs_all'),
-            ],
-            [Markup.button.callback('⬅️ Main menu', 'act:menu')],
-          ]).reply_markup;
-          await ctx.editMessageText(logsText(false), {
-            parse_mode: 'HTML',
-            reply_markup: logsKb,
-          });
-          return;
-        }
 
         case 'set_channel':
           awaiting.set(userId, 'set_channel');
