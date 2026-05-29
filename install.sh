@@ -187,15 +187,15 @@ install_xray() {
   fi
 }
 
-# ---------- tgpanel ----------
-install_tgpanel() {
-  local panel="$INSTALL_DIR/scripts/tgpanel.sh"
+# ---------- tgsender ----------
+install_tgsender() {
+  local panel="$INSTALL_DIR/scripts/tgsender.sh"
   if [ -f "$panel" ]; then
     sudo chmod +x "$panel"
-    sudo ln -sf "$panel" /usr/local/bin/tgpanel
-    ok "tgpanel installed — type 'tgpanel' anywhere to open the control panel"
+    sudo ln -sf "$panel" /usr/local/bin/tgsender
+    ok "tgsender installed — type 'tgsender' anywhere to open the control panel"
   else
-    warn "tgpanel.sh not found — skipping panel installation"
+    warn "tgsender.sh not found — skipping panel installation"
   fi
 }
 
@@ -253,7 +253,7 @@ print_summary() {
   printf '%s\n' "  ${BOLD}Logs:${RESET}    journalctl -u ${APP_NAME} -f"
   printf '%s\n' "  ${BOLD}Restart:${RESET} sudo systemctl restart ${APP_NAME}"
   printf '%s\n' "  ${BOLD}Stop:${RESET}    sudo systemctl stop ${APP_NAME}"
-  printf '%s\n' "  ${BOLD}Panel:${RESET}   tgpanel"
+  printf '%s\n' "  ${BOLD}Panel:${RESET}   tgsender"
   echo
   printf '%s\n' "  ${BOLD}Next steps:${RESET}"
   if [ -n "$PUBLISH_CHANNEL" ]; then
@@ -293,7 +293,7 @@ main() {
   setup_env
   build_project
   install_service
-  install_tgpanel
+  install_tgsender
   print_summary
 }
 

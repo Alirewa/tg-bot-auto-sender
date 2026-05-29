@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# tgpanel - control panel for tg-bot-auto-sender
+# tgsender - control panel for tg-bot-auto-sender
 # Install:
-#   sudo bash /opt/tg-bot-auto-sender/scripts/install-tgpanel.sh
+#   sudo bash /opt/tg-bot-auto-sender/scripts/install-tgsender.sh
 # Then run anywhere:
-#   tgpanel
+#   tgsender
 
 set -u
 
@@ -254,7 +254,7 @@ action_uninstall() {
   warn "This will completely remove the project:"
   echo "  - Stop and delete service: $APP_NAME"
   echo "  - Remove directory: $PROJECT_DIR (including data and logs)"
-  echo "  - Remove symlink: /usr/local/bin/tgpanel"
+  echo "  - Remove symlink: /usr/local/bin/tgsender"
   if ! confirm "Continue?"; then
     note "Aborted."; pause; return
   fi
@@ -277,9 +277,9 @@ action_uninstall() {
     sudo rm -rf "$PROJECT_DIR"
     ok "Project directory removed."
   fi
-  if [ -L /usr/local/bin/tgpanel ]; then
-    sudo rm -f /usr/local/bin/tgpanel
-    ok "tgpanel symlink removed."
+  if [ -L /usr/local/bin/tgsender ]; then
+    sudo rm -f /usr/local/bin/tgsender
+    ok "tgsender symlink removed."
   fi
   ok "Uninstall complete."
   exit 0
@@ -307,7 +307,7 @@ menu() {
   clear
   cat <<EOF
 ${C_BOLD}${C_CYAN}===============================================
-        tgpanel - bot control panel
+        tgsender - bot control panel
 ===============================================${C_RESET}
 ${C_DIM}Project dir : $PROJECT_DIR${C_RESET}
 ${C_DIM}Developed by: @Alirewa${C_RESET}
