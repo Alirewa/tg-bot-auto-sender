@@ -107,7 +107,7 @@ function renderLabel(template: string, c: ValidatedConfig, n: number): string {
  *
  *   ᴄᴏᴜɴᴛʀʏ: #ɪʀᴀɴ(🇮🇷)  @channel
  */
-function buildMessage(c: ValidatedConfig, renamedRaw: string): string {
+function buildMessage(c: ValidatedConfig, renamedRaw: string, n: number): string {
   // Truncate very long configs so the message stays under Telegram's 4096-char limit.
   const truncated =
     renamedRaw.length > MAX_CONFIG_LENGTH ? renamedRaw.slice(0, MAX_CONFIG_LENGTH) : renamedRaw;
@@ -123,6 +123,7 @@ function buildMessage(c: ValidatedConfig, renamedRaw: string): string {
   const countryLine = `${toSmallCaps('country')}: #${nameTag}(${c.flag})  ${channelHandle}`;
 
   return [
+    `Config #${n}`,
     `<pre>${body}</pre>`,
     '',
     countryLine,
@@ -152,7 +153,7 @@ export async function publishConfig(bot: Telegraf, c: ValidatedConfig): Promise<
   const n = SettingsRepo.incrementInt('post_counter', 1);
   const label = renderLabel(template, c, n);
   const renamed = renameConfig(c.protocol, c.raw, label);
-  const text = buildMessage(c, renamed);
+  const text = buildMessage(c, renamed, n);
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {

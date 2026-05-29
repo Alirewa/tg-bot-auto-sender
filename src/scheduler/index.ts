@@ -211,8 +211,11 @@ export async function runScrapeCycle(opts: ScrapeOptions = {}): Promise<ScrapeRe
       if (xrayBin) {
         logger.info('scrape: xray sweep starting', { configs: aliveConfigs.length });
         opts.onProgress?.({ phase: 'xray', total: aliveConfigs.length, done: 0, alive: 0 });
+        // Pass hashFilter so only this batch is tested — previous queue entries untouched.
+        const newBatchHashes = new Set(aliveConfigs.map((v) => v.hash));
         try {
           const xrayResult = await validateWithXray({
+            hashFilter: newBatchHashes,
             onProgress: (e) => {
               broadcast({
                 phase: 'xray',
@@ -412,8 +415,18 @@ export function stopScheduler(): void {
  *
  * Concurrency is low (default 5) because each check spawns a real process.
  */
+export interface XrayValidateOptions {
+  onProgress?: (e: ScrapeProgressEvent) => void;
+  /**
+   * When provided, only configs whose hash is in this set are tested.
+   * Dead ones are removed from queue individually (not queue.clear).
+   * When omitted the entire queued set is tested and queue is rebuilt.
+   */
+  hashFilter?: Set<string>;
+}
+
 export async function validateWithXray(
-  opts: ScrapeOptions = {},
+  opts: XrayValidateOptions = {},
 ): Promise<{ xrayFound: boolean; revalidated: number; alive: number }> {
   const xrayBin = findXrayBinary();
   if (!xrayBin) {
@@ -423,13 +436,19 @@ export async function validateWithXray(
   const XRAY_CONCURRENCY = 5;
   const XRAY_TIMEOUT_MS = 10_000;
 
-  const rows = ConfigRepo.loadQueued();
+  const allQueued = ConfigRepo.loadQueued();
+  // If a hashFilter is given, only test configs in this batch.
+  const rows = opts.hashFilter
+    ? allQueued.filter((r) => opts.hashFilter!.has(r.hash))
+    : allQueued;
+
   if (rows.length === 0) {
     return { xrayFound: true, revalidated: 0, alive: 0 };
   }
 
   logger.info('xray-validate: starting', {
     total: rows.length,
+    filtered: !!opts.hashFilter,
     concurrency: XRAY_CONCURRENCY,
     timeoutMs: XRAY_TIMEOUT_MS,
   });
@@ -437,7 +456,6 @@ export async function validateWithXray(
   const limit = pLimit(XRAY_CONCURRENCY);
   let done = 0;
   let aliveCount = 0;
-  const aliveRows: typeof rows = [];
 
   opts.onProgress?.({ phase: 'validating', total: rows.length, done: 0, alive: 0 });
 
@@ -455,31 +473,35 @@ export async function validateWithXray(
         done++;
         if (result.alive) {
           aliveCount++;
-          aliveRows.push(r);
         } else {
+          // Mark dead in DB and remove from in-memory queue without touching other batches.
           ConfigRepo.markDead(r.hash);
+          queue.remove(r.hash);
         }
         opts.onProgress?.({ phase: 'validating', total: rows.length, done, alive: aliveCount });
       }),
     ),
   );
 
-  // Rebuild queue from survivors only
-  const aliveValidated: ValidatedConfig[] = aliveRows.map((r) => {
-    const code = r.country ?? 'XX';
-    return {
-      hash: r.hash, raw: r.raw, protocol: r.protocol,
-      host: r.host, port: r.port,
-      latencyMs: r.latency_ms ?? 0,
-      country: code,
-      flag: code.length === 2
-        ? String.fromCodePoint(...[...code.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65))
-        : '🏳️',
-    };
-  });
-
-  queue.clear();
-  queue.enqueueMany(aliveValidated);
+  // When no filter: full queue rebuild (manual "Test queue" button path).
+  // markDead already removed dead rows from DB; reload survivors from DB.
+  if (!opts.hashFilter) {
+    const survivors = ConfigRepo.loadQueued();
+    const survivorValidated: ValidatedConfig[] = survivors.map((r) => {
+      const code = r.country ?? 'XX';
+      return {
+        hash: r.hash, raw: r.raw, protocol: r.protocol,
+        host: r.host, port: r.port,
+        latencyMs: r.latency_ms ?? 0,
+        country: code,
+        flag: code.length === 2
+          ? String.fromCodePoint(...[...code.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65))
+          : '🏳️',
+      };
+    });
+    queue.clear();
+    queue.enqueueMany(survivorValidated);
+  }
 
   opts.onProgress?.({ phase: 'done', total: rows.length, alive: aliveCount });
   logger.info('xray-validate: done', { revalidated: rows.length, alive: aliveCount });
