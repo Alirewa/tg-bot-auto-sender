@@ -13,6 +13,8 @@ import {
   validateQueueStrict,
   validateWithXray,
   runScrapeCycle,
+  testSourcesWithXray,
+  SourceXrayStats,
   ScrapeProgressEvent,
 } from '../scheduler';
 import { findXrayBinary } from '../validator/xray';
@@ -98,64 +100,98 @@ function mainMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
   const list = SubsRepo.list();
 
-  // Load last-scrape per-source stats (stored after each cycle).
-  type SourceStat = { id: number; parsed: number; error: string | null };
-  let lastStats: SourceStat[] = [];
+  // Last scrape per-source counts (stored by scheduler after each cycle).
+  type ScrapeStat = { id: number; parsed: number; error: string | null };
+  let scrapeStats: ScrapeStat[] = [];
   try {
-    lastStats = JSON.parse(SettingsRepo.getString('last_scrape_per_source', '[]')) as SourceStat[];
-  } catch { /* ignore parse errors */ }
+    scrapeStats = JSON.parse(SettingsRepo.getString('last_scrape_per_source', '[]')) as ScrapeStat[];
+  } catch { /* ignore */ }
+  const scrapeMap = new Map(scrapeStats.map((s) => [s.id, s]));
 
-  const lastXrayRaw = SettingsRepo.getString('last_xray_result', '');
-  let xraySummary = '';
+  // Last per-source xray test (stored by testSourcesWithXray).
+  let xrayStats: SourceXrayStats[] = [];
   try {
-    if (lastXrayRaw) {
-      const xr = JSON.parse(lastXrayRaw) as { tcpAlive: number; xrayAlive: number; at: string };
-      const when = xr.at ? xr.at.slice(0, 16).replace('T', ' ') : '';
-      xraySummary = `\n<b>Last xray sweep</b> (${when}): TCP alive <b>${xr.tcpAlive}</b> → Xray confirmed <b>${xr.xrayAlive}</b>`;
+    xrayStats = JSON.parse(SettingsRepo.getString('last_source_xray', '[]')) as SourceXrayStats[];
+  } catch { /* ignore */ }
+  const xrayMap = new Map(xrayStats.map((s) => [s.id, s]));
+
+  // Global xray sweep result from last scrape.
+  let xraySweepLine = '';
+  try {
+    const xr = JSON.parse(SettingsRepo.getString('last_xray_result', '{}')) as {
+      tcpAlive?: number; xrayAlive?: number; at?: string;
+    };
+    if (xr.at) {
+      const when = xr.at.slice(0, 16).replace('T', ' ');
+      xraySweepLine = `Last cycle (${when}): TCP <b>${xr.tcpAlive ?? '?'}</b> → Xray ✓<b>${xr.xrayAlive ?? '?'}</b>`;
     }
   } catch { /* ignore */ }
 
-  const statMap = new Map(lastStats.map((s) => [s.id, s]));
+  const lastAt = SettingsRepo.getString('last_scrape_at', '');
+  const lastAtStr = lastAt ? lastAt.slice(0, 16).replace('T', ' ') : '—';
+
+  const enabled = list.filter((s) => s.enabled).length;
+  const header = [
+    `<b>🔗 Sources</b>  (${enabled}/${list.length} enabled)`,
+    `<i>Last scrape: ${lastAtStr}</i>`,
+    xraySweepLine,
+    '',
+  ].filter(Boolean).join('\n');
 
   const lines = list.length
     ? list.map((s) => {
-        const stat = statMap.get(s.id);
-        const icon = s.enabled ? '🟢' : '⚪️';
-        const truncUrl = s.url.length > 55 ? s.url.slice(0, 55) + '…' : s.url;
-        let statStr = '';
-        if (stat) {
-          if (stat.error) {
-            statStr = ` <i>— ❌ error</i>`;
+        const sc = scrapeMap.get(s.id);
+        const xr = xrayMap.get(s.id);
+        const statusIcon = s.enabled ? '🟢' : '⚪️';
+        const truncUrl = s.url.length > 52 ? s.url.slice(0, 52) + '…' : s.url;
+
+        // Config count from last scrape
+        let countStr = '';
+        if (sc) {
+          countStr = sc.error ? '❌ fetch error' : `${sc.parsed} configs`;
+        }
+
+        // Xray result from last source test
+        let xrayStr = '';
+        if (xr) {
+          if (xr.fetchError) {
+            xrayStr = '❌ unreachable';
+          } else if (xr.sampled === 0) {
+            xrayStr = '⚠️ empty';
           } else {
-            statStr = ` <i>— ${stat.parsed} configs</i>`;
+            const icon = xr.xrayAlive > 0 ? '✅' : '❌';
+            xrayStr = `${icon} ${xr.xrayAlive}/${xr.sampled} xray`;
           }
         }
-        return `${icon} <b>#${s.id}</b>${statStr}\n   <code>${escapeHtml(truncUrl)}</code>`;
+
+        const statsLine = [countStr, xrayStr].filter(Boolean).join('  |  ');
+
+        return [
+          `${statusIcon} <b>#${s.id}</b>  ${statsLine ? `<i>${statsLine}</i>` : ''}`,
+          `   <code>${escapeHtml(truncUrl)}</code>`,
+        ].join('\n');
       }).join('\n')
-    : '— no sources yet.';
+    : '— no sources yet —';
 
-  const lastAt = SettingsRepo.getString('last_scrape_at', '');
-  const lastAtStr = lastAt ? `\n<i>Last scrape: ${lastAt.slice(0, 16).replace('T', ' ')}</i>` : '';
+  const text = header + lines;
 
-  const text = [
-    '<b>🔗 Subscription sources</b>',
-    lastAtStr,
-    xraySummary,
-    '',
-    lines,
-  ].filter(Boolean).join('\n');
+  const hasBroken = list.some((s) => {
+    const xr = xrayMap.get(s.id);
+    return xr && (!!xr.fetchError || xr.xrayAlive === 0);
+  });
 
   const kb = Markup.inlineKeyboard([
     [
-      Markup.button.callback('➕ Add source', 'act:add_sub'),
-      Markup.button.callback('🗑 Delete source', 'act:del_sub'),
+      Markup.button.callback('➕ Add', 'act:add_sub'),
+      Markup.button.callback('🗑 Delete', 'act:del_sub'),
+      Markup.button.callback('🔀 Toggle', 'act:toggle_sub'),
     ],
-    [
-      Markup.button.callback('🟢/⚪️ Toggle', 'act:toggle_sub'),
-      Markup.button.callback('🔄 Refresh', 'act:subs'),
-    ],
-    [Markup.button.callback('🩺 Health check sources', 'act:source_health')],
-    [Markup.button.callback('⬅️ Main menu', 'act:menu')],
+    [Markup.button.callback('🧪 Test sources (xray sample)', 'act:source_xray_test')],
+    [Markup.button.callback('🩺 Quick check (fetch only)', 'act:source_health')],
+    ...(hasBroken
+      ? [[Markup.button.callback('🗑 Remove broken sources', 'act:delete_broken_sources')]]
+      : []),
+    [Markup.button.callback('🔄 Refresh', 'act:subs'), Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
   return { text, keyboard: kb };
@@ -815,6 +851,94 @@ export function registerCommands(bot: Telegraf): void {
             { parse_mode: 'HTML' },
           );
           return;
+
+        case 'source_xray_test': {
+          await ctx.answerCbQuery('Starting xray test...');
+          await ctx.editMessageText(
+            '🧪 <b>Testing sources with Xray</b>\n\n⏳ Fetching each source and running xray probe on up to 5 configs per source...\nThis takes 1–3 minutes.',
+            { parse_mode: 'HTML' },
+          );
+
+          const { results, xrayFound } = await testSourcesWithXray(5);
+
+          if (!xrayFound) {
+            await ctx.reply('❌ xray binary not found. Install xray first.', {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back', 'act:subs')]]).reply_markup,
+            });
+            return;
+          }
+
+          const lines = results.map((r) => {
+            const icon = r.enabled ? '🟢' : '⚪️';
+            const truncUrl = r.url.length > 50 ? r.url.slice(0, 50) + '…' : r.url;
+            if (r.fetchError) {
+              return `${icon} <b>#${r.id}</b> ❌ unreachable\n   <code>${escapeHtml(truncUrl)}</code>\n   <i>${escapeHtml(r.fetchError)}</i>`;
+            }
+            if (r.configCount === 0) {
+              return `${icon} <b>#${r.id}</b> ⚠️ 0 configs\n   <code>${escapeHtml(truncUrl)}</code>`;
+            }
+            const xrIcon = r.xrayAlive > 0 ? '✅' : '❌';
+            return `${icon} <b>#${r.id}</b>  ${r.configCount} configs  ${xrIcon} ${r.xrayAlive}/${r.sampled} xray\n   <code>${escapeHtml(truncUrl)}</code>`;
+          });
+
+          const broken = results.filter((r) => r.fetchError || r.xrayAlive === 0).length;
+          const summary = broken > 0
+            ? `\n⚠️ <b>${broken}</b> source(s) look broken (use 🗑 Remove broken to clean up).`
+            : '\n✅ All sources produced working configs.';
+
+          const resultText = [
+            '🧪 <b>Xray source test complete</b>',
+            '',
+            ...lines,
+            summary,
+          ].join('\n');
+
+          await ctx.telegram
+            .editMessageText(ctx.chat!.id, (await ctx.reply('.')).message_id - 1, undefined, resultText, {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup,
+            })
+            .catch(() =>
+              ctx.reply(resultText, {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup,
+              }),
+            );
+          return;
+        }
+
+        case 'delete_broken_sources': {
+          await ctx.answerCbQuery();
+          let xrayStats: SourceXrayStats[] = [];
+          try {
+            xrayStats = JSON.parse(SettingsRepo.getString('last_source_xray', '[]')) as SourceXrayStats[];
+          } catch { /* ignore */ }
+
+          const broken = xrayStats.filter((r) => r.fetchError || r.xrayAlive === 0);
+          if (broken.length === 0) {
+            await ctx.editMessageText('✅ No broken sources found. Run 🧪 Test first.', {
+              reply_markup: Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', 'act:subs')]]).reply_markup,
+            });
+            return;
+          }
+
+          for (const r of broken) {
+            SubsRepo.remove(r.id);
+            logger.info('admin: deleted broken source', { id: r.id, url: r.url });
+          }
+
+          await ctx.editMessageText(
+            `🗑 <b>Removed ${broken.length} broken source(s):</b>\n\n` +
+              broken.map((r) => `• <b>#${r.id}</b> <code>${escapeHtml(r.url.slice(0, 60))}</code>`).join('\n') +
+              '\n\nRun a fresh scrape to refill the queue.',
+            {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup,
+            },
+          );
+          return;
+        }
 
         case 'source_health': {
           await ctx.answerCbQuery('Checking sources...');
