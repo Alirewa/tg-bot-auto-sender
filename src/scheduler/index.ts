@@ -563,6 +563,99 @@ export async function validateQueueStrict(
   return { revalidated: rows.length, alive: alive.length };
 }
 
+// ---------------------------------------------------------------------------
+// Per-source xray health test
+// ---------------------------------------------------------------------------
+
+export interface SourceXrayStats {
+  id: number;
+  url: string;
+  enabled: boolean;
+  configCount: number;   // configs parsed from source
+  sampled: number;       // how many were xray-tested
+  xrayAlive: number;     // how many passed xray
+  fetchError?: string;
+  checkedAt: string;
+}
+
+/**
+ * For each subscription source (enabled + disabled), fetch it, parse configs,
+ * take a small sample, and xray-test them.  Stores results in settings DB.
+ * Returns per-source stats so the caller can display them.
+ */
+export async function testSourcesWithXray(
+  maxSamplePerSource = 5,
+): Promise<{ results: SourceXrayStats[]; xrayFound: boolean }> {
+  const xrayBin = findXrayBinary();
+  if (!xrayBin) return { results: [], xrayFound: false };
+
+  const { SubsRepo: SR } = await import('../database/repositories');
+  const { default: axios } = await import('axios');
+  const { parseConfigsFromText } = await import('../scraper/parser');
+
+  const all = SR.list();
+  const XRAY_TIMEOUT = 8_000;
+  const CONCURRENCY = 3;
+  const limit = pLimit(CONCURRENCY);
+  const results: SourceXrayStats[] = [];
+
+  for (const sub of all) {
+    let configCount = 0;
+    let sampled = 0;
+    let xrayAlive = 0;
+    let fetchError: string | undefined;
+
+    try {
+      const res = await axios.get<string>(sub.url, {
+        timeout: 15_000,
+        responseType: 'text',
+        transformResponse: [(v) => v],
+        validateStatus: (s) => s >= 200 && s < 300,
+      });
+      const text = typeof res.data === 'string' ? res.data : String(res.data);
+      const parsed = parseConfigsFromText(text);
+      configCount = parsed.length;
+
+      const sample = parsed.slice(0, maxSamplePerSource);
+      sampled = sample.length;
+
+      const xrayTasks = sample.map((c) =>
+        limit(async () => {
+          const r = await xrayProbe(c, xrayBin, XRAY_TIMEOUT);
+          if (r.alive) xrayAlive++;
+        }),
+      );
+      await Promise.all(xrayTasks);
+    } catch (err) {
+      fetchError = err instanceof Error ? err.message.slice(0, 80) : String(err).slice(0, 80);
+    }
+
+    results.push({
+      id: sub.id,
+      url: sub.url,
+      enabled: sub.enabled === 1,
+      configCount,
+      sampled,
+      xrayAlive,
+      fetchError,
+      checkedAt: new Date().toISOString(),
+    });
+
+    logger.info('source-xray-test', {
+      id: sub.id,
+      configCount,
+      sampled,
+      xrayAlive,
+      fetchError,
+    });
+  }
+
+  // Persist for display in Sources menu.
+  SettingsRepo.setString('last_source_xray', JSON.stringify(results));
+
+  return { results, xrayFound: true };
+}
+
 export async function forceValidateQueue(
   opts: ScrapeOptions = {},
 ): Promise<{ revalidated: number; alive: number }> {
