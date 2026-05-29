@@ -159,8 +159,14 @@ function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
           } else if (xr.sampled === 0) {
             xrayStr = '⚠️ empty';
           } else {
-            const icon = xr.xrayAlive > 0 ? '✅' : '❌';
-            xrayStr = `${icon} ${xr.xrayAlive}/${xr.sampled} xray`;
+            const tested = xr.xrayTested ?? xr.sampled;
+            const skipped = xr.xraySkipped ?? 0;
+            if (tested === 0 && skipped > 0) {
+              xrayStr = `⚠️ all skipped (REALITY/WG)`;
+            } else if (tested > 0) {
+              const icon = xr.xrayAlive > 0 ? '✅' : '❌';
+              xrayStr = `${icon} ${xr.xrayAlive}/${tested} xray`;
+            }
           }
         }
 
@@ -876,10 +882,20 @@ export function registerCommands(bot: Telegraf): void {
               return `${icon} <b>#${r.id}</b> ❌ unreachable\n   <code>${escapeHtml(truncUrl)}</code>\n   <i>${escapeHtml(r.fetchError)}</i>`;
             }
             if (r.configCount === 0) {
-              return `${icon} <b>#${r.id}</b> ⚠️ 0 configs\n   <code>${escapeHtml(truncUrl)}</code>`;
+              return `${icon} <b>#${r.id}</b> ⚠️ 0 configs found\n   <code>${escapeHtml(truncUrl)}</code>`;
             }
-            const xrIcon = r.xrayAlive > 0 ? '✅' : '❌';
-            return `${icon} <b>#${r.id}</b>  ${r.configCount} configs  ${xrIcon} ${r.xrayAlive}/${r.sampled} xray\n   <code>${escapeHtml(truncUrl)}</code>`;
+            // xrayTested = actual tested (excl. REALITY/WireGuard skipped)
+            const tested = (r as SourceXrayStats).xrayTested ?? r.sampled;
+            const skipped = (r as SourceXrayStats).xraySkipped ?? 0;
+            let xrLine = '';
+            if (tested === 0 && skipped > 0) {
+              xrLine = `⚠️ all ${skipped} skipped (REALITY/WG)`;
+            } else if (tested > 0) {
+              const xrIcon = r.xrayAlive > 0 ? '✅' : '❌';
+              xrLine = `${xrIcon} ${r.xrayAlive}/${tested} xray`;
+              if (skipped > 0) xrLine += ` (+${skipped} skipped)`;
+            }
+            return `${icon} <b>#${r.id}</b>  ${r.configCount} configs  ${xrLine}\n   <code>${escapeHtml(truncUrl)}</code>`;
           });
 
           const broken = results.filter((r) => r.fetchError || r.xrayAlive === 0).length;
