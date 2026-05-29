@@ -18,6 +18,9 @@ import {
 import { findXrayBinary } from '../validator/xray';
 import { getActiveSources } from '../scraper/sources';
 import { checkSourcesHealth } from '../scraper';
+import { parseConfigsFromText } from '../scraper/parser';
+import { resolveCountry } from '../geoip';
+import { ValidatedConfig } from '../types';
 
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
@@ -868,6 +871,59 @@ export function registerCommands(bot: Telegraf): void {
     } else {
       await ctx.reply('Nothing was waiting for input.');
     }
+  });
+
+  // ---------- forwarded message → add config to queue ----------
+  bot.on('message', async (ctx, next) => {
+    const msg = ctx.message as unknown as Record<string, unknown>;
+    // Detect forwarded messages (both legacy forward_from and new forward_origin API).
+    const isForwarded =
+      'forward_origin' in msg ||
+      'forward_from' in msg ||
+      'forward_from_chat' in msg ||
+      'forward_sender_name' in msg;
+    if (!isForwarded) return next();
+
+    const rawText =
+      (msg['text'] as string | undefined) ?? (msg['caption'] as string | undefined) ?? '';
+    if (!rawText) return next();
+
+    const parsed = parseConfigsFromText(rawText);
+    if (parsed.length === 0) {
+      await ctx.reply('⚠️ No V2Ray configs found in the forwarded message.');
+      return;
+    }
+
+    let added = 0;
+    let skipped = 0;
+    for (const c of parsed) {
+      // Skip configs already in queue or posted.
+      if (ConfigRepo.exists(c.hash)) { skipped++; continue; }
+      const geo = await resolveCountry(c.host);
+      const v: ValidatedConfig = {
+        ...c,
+        latencyMs: 0,
+        country: geo.countryCode,
+        flag: geo.flag,
+      };
+      ConfigRepo.insertValidated(v);
+      if (queue.enqueueMany([v]) > 0) added++;
+    }
+
+    const lines = [
+      added > 0
+        ? `✅ <b>${added}</b> config(s) added to queue.`
+        : '⚠️ No new configs — all already known.',
+      skipped > 0 ? `ℹ️ ${skipped} skipped (duplicate).` : '',
+      `Queue: <b>${queue.size()}</b>`,
+      '',
+      'The config will be published in the next available slot with your template applied.',
+    ].filter(Boolean);
+
+    logger.info('admin: forwarded config(s) added', {
+      parsed: parsed.length, added, skipped,
+    });
+    await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
   });
 
   bot.on('text', async (ctx) => {
