@@ -4,7 +4,7 @@ export const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
 
 // Default sources seeded only on first-ever startup (empty table).
 // After that, admin changes are permanent — these are never re-inserted.
-const DEFAULT_SOURCES = [
+export const DEFAULT_SOURCES = [
   'https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/config.txt',
   'https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/sub1.txt',
   'https://raw.githubusercontent.com/Alirewa/V2ray-Configs/main/sub2.txt',

@@ -8,6 +8,7 @@ import {
   SettingsRepo,
   SubsRepo,
 } from '../database/repositories';
+import { DEFAULT_SOURCES } from '../database/migrations';
 import { queue } from '../scheduler/queue';
 import {
   validateQueueStrict,
@@ -200,7 +201,10 @@ function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
     ...(hasBroken
       ? [[Markup.button.callback('🗑 Remove broken sources', 'act:delete_broken_sources')]]
       : []),
-    [Markup.button.callback('☠️ Delete ALL sources', 'act:delete_all_sources')],
+    [
+      Markup.button.callback('☠️ Delete ALL', 'act:delete_all_sources'),
+      Markup.button.callback('♻️ Restore defaults', 'act:restore_default_sources'),
+    ],
     [Markup.button.callback('🔄 Refresh', 'act:subs'), Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
@@ -1013,6 +1017,31 @@ export function registerCommands(bot: Telegraf): void {
               reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup,
             },
           );
+          return;
+        }
+
+        case 'restore_default_sources': {
+          await ctx.answerCbQuery();
+          let added = 0;
+          const now = Date.now();
+          for (const url of DEFAULT_SOURCES) {
+            const before = SubsRepo.list().length;
+            SubsRepo.add(url);
+            if (SubsRepo.list().length > before) added++;
+          }
+          const msg =
+            added > 0
+              ? `♻️ <b>${added} default source(s) restored.</b>\n\n` +
+                DEFAULT_SOURCES.map((u) => `• <code>${escapeHtml(u)}</code>`).join('\n')
+              : '✅ Default sources are already present — nothing to restore.';
+          void now;
+          await ctx.editMessageText(msg, {
+            parse_mode: 'HTML',
+            reply_markup: Markup.inlineKeyboard([
+              [Markup.button.callback('🔗 Back to Sources', 'act:subs')],
+            ]).reply_markup,
+          });
+          logger.info('admin: default sources restored', { added });
           return;
         }
 
