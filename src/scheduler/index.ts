@@ -315,12 +315,15 @@ async function publishTick(bot: Telegraf): Promise<void> {
   });
   try {
     if (queue.size() === 0) {
-      logger.info('publish: queue empty, triggering scrape');
-      await runScrapeCycle();
-      if (queue.size() === 0) {
-        logger.info('publish: still empty after scrape, will retry next tick');
-        return;
+      if (!isScraping()) {
+        // Fire a background scrape — don't await so publish ticks aren't frozen
+        // for the full scrape duration (potentially minutes).
+        logger.info('publish: queue empty, triggering background scrape');
+        void runScrapeCycle();
+      } else {
+        logger.debug('publish: queue empty, scrape already in progress');
       }
+      return;
     }
 
     const next = queue.dequeue();
@@ -492,10 +495,12 @@ export async function validateWithXray(
         };
         const result = await xrayProbe(c, xrayBin, XRAY_TIMEOUT_MS);
         done++;
-        if (result.alive) {
+        if (result.alive || result.skipped) {
+          // alive  → confirmed working via real HTTP
+          // skipped → REALITY/WireGuard — can't probe externally, keep in queue
           aliveCount++;
         } else {
-          // Mark dead in DB and remove from in-memory queue without touching other batches.
+          // Definitely dead: mark in DB and remove from in-memory queue.
           ConfigRepo.markDead(r.hash);
           queue.remove(r.hash);
         }

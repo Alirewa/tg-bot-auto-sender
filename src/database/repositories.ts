@@ -361,4 +361,10 @@ export const SubsRepo = {
       .run(enabled ? 1 : 0, id);
     return r.changes > 0;
   },
+
+  deleteAll(): number {
+    const db = getDb();
+    const res = db.prepare('DELETE FROM sub_links').run();
+    return res.changes;
+  },
 };

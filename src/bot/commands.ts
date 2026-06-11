@@ -27,7 +27,7 @@ import { ValidatedConfig } from '../types';
 const startTimestamp = Date.now();
 const DEFAULT_TEMPLATE = '{flag} - #{n} {channel}';
 
-type AwaitingKind = 'add_sub' | 'del_sub' | 'set_template' | 'toggle_sub' | 'set_channel';
+type AwaitingKind = 'add_sub' | 'del_sub' | 'set_template' | 'toggle_sub' | 'set_channel' | 'add_tg_channel';
 const awaiting = new Map<number, AwaitingKind>();
 
 function formatUptime(ms: number): string {
@@ -188,15 +188,19 @@ function subsMenu(): { text: string; keyboard: InlineKeyboardMarkup } {
 
   const kb = Markup.inlineKeyboard([
     [
-      Markup.button.callback('➕ Add', 'act:add_sub'),
+      Markup.button.callback('➕ Add URL', 'act:add_sub'),
+      Markup.button.callback('📲 Add TG Channel', 'act:add_tg_channel'),
+    ],
+    [
       Markup.button.callback('🗑 Delete', 'act:del_sub'),
       Markup.button.callback('🔀 Toggle', 'act:toggle_sub'),
     ],
-    [Markup.button.callback('🧪 Test sources (xray sample)', 'act:source_xray_test')],
+    [Markup.button.callback('🧪 Test sources (xray)', 'act:source_xray_test')],
     [Markup.button.callback('🩺 Quick check (fetch only)', 'act:source_health')],
     ...(hasBroken
       ? [[Markup.button.callback('🗑 Remove broken sources', 'act:delete_broken_sources')]]
       : []),
+    [Markup.button.callback('☠️ Delete ALL sources', 'act:delete_all_sources')],
     [Markup.button.callback('🔄 Refresh', 'act:subs'), Markup.button.callback('⬅️ Main menu', 'act:menu')],
   ]).reply_markup;
 
@@ -816,6 +820,56 @@ export function registerCommands(bot: Telegraf): void {
           );
           return;
 
+        case 'add_tg_channel':
+          awaiting.set(userId, 'add_tg_channel');
+          await ctx.answerCbQuery();
+          await ctx.reply(
+            '📲 Send the Telegram channel username to scrape configs from.\n\n' +
+              'Examples:\n<code>@v2raycollector</code>\n<code>v2raycollector</code>\n\n' +
+              'The bot will scrape its public posts for V2Ray configs.\n\n/cancel to abort',
+            { parse_mode: 'HTML' },
+          );
+          return;
+
+        case 'delete_all_sources': {
+          await ctx.answerCbQuery();
+          const total = SubsRepo.list().length;
+          await ctx.editMessageText(
+            `⚠️ <b>Delete ALL ${total} source(s)?</b>\n\n` +
+              `This removes every source from the database.\n` +
+              `The bot will have nothing to scrape until you add new ones.\n\n` +
+              `This cannot be undone.`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([
+                [
+                  Markup.button.callback('✅ Yes, delete all', 'act:delete_all_sources_confirm'),
+                  Markup.button.callback('❌ Cancel', 'act:subs'),
+                ],
+              ]).reply_markup,
+            },
+          );
+          return;
+        }
+
+        case 'delete_all_sources_confirm': {
+          const deleted = SubsRepo.deleteAll();
+          await ctx.answerCbQuery('All sources deleted');
+          await ctx.editMessageText(
+            `🗑 <b>${deleted} source(s) deleted.</b>\n\n` +
+              `Use ➕ Add URL or 📲 Add TG Channel to add new sources.\n` +
+              `Tap ⏳ Scrape now after adding sources.`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('🔗 Back to Sources', 'act:subs')],
+              ]).reply_markup,
+            },
+          );
+          logger.info('admin: all sources deleted', { deleted });
+          return;
+        }
+
         case 'del_sub':
           awaiting.set(userId, 'del_sub');
           await ctx.answerCbQuery();
@@ -860,18 +914,25 @@ export function registerCommands(bot: Telegraf): void {
 
         case 'source_xray_test': {
           await ctx.answerCbQuery('Starting xray test...');
+          const msgId = (ctx.callbackQuery.message as { message_id: number }).message_id;
           await ctx.editMessageText(
-            '🧪 <b>Testing sources with Xray</b>\n\n⏳ Fetching each source and running xray probe on up to 5 configs per source...\nThis takes 1–3 minutes.',
+            '🧪 <b>Testing sources with Xray</b>\n\n⏳ Fetching each source and running xray probe on 20 configs per source...\nThis takes 2–5 minutes.',
             { parse_mode: 'HTML' },
           );
 
-          const { results, xrayFound } = await testSourcesWithXray(5);
+          const { results, xrayFound } = await testSourcesWithXray(20);
 
           if (!xrayFound) {
-            await ctx.reply('❌ xray binary not found. Install xray first.', {
-              parse_mode: 'HTML',
-              reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back', 'act:subs')]]).reply_markup,
-            });
+            await ctx.telegram
+              .editMessageText(
+                ctx.chat!.id, msgId, undefined,
+                '❌ xray binary not found on the server. Install it first:\n<code>bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install</code>',
+                {
+                  parse_mode: 'HTML',
+                  reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back', 'act:subs')]]).reply_markup,
+                },
+              )
+              .catch(() => {});
             return;
           }
 
@@ -884,7 +945,6 @@ export function registerCommands(bot: Telegraf): void {
             if (r.configCount === 0) {
               return `${icon} <b>#${r.id}</b> ⚠️ 0 configs found\n   <code>${escapeHtml(truncUrl)}</code>`;
             }
-            // xrayTested = actual tested (excl. REALITY/WireGuard skipped)
             const tested = (r as SourceXrayStats).xrayTested ?? r.sampled;
             const skipped = (r as SourceXrayStats).xraySkipped ?? 0;
             let xrLine = '';
@@ -911,7 +971,7 @@ export function registerCommands(bot: Telegraf): void {
           ].join('\n');
 
           await ctx.telegram
-            .editMessageText(ctx.chat!.id, (await ctx.reply('.')).message_id - 1, undefined, resultText, {
+            .editMessageText(ctx.chat!.id, msgId, undefined, resultText, {
               parse_mode: 'HTML',
               reply_markup: Markup.inlineKeyboard([[Markup.button.callback('🔗 Back to Sources', 'act:subs')]]).reply_markup,
             })
@@ -1119,6 +1179,27 @@ export function registerCommands(bot: Telegraf): void {
       }
       SubsRepo.add(text);
       await ctx.reply(`✅ Added:\n<code>${escapeHtml(text)}</code>`, { parse_mode: 'HTML' });
+      const v = subsMenu();
+      await ctx.reply(v.text, { parse_mode: 'HTML', reply_markup: v.keyboard });
+      return;
+    }
+
+    if (kind === 'add_tg_channel') {
+      // Accept "@channelname" or "channelname"
+      const username = text.trim().replace(/^@/, '');
+      if (!/^[a-zA-Z][a-zA-Z0-9_]{3,}$/.test(username)) {
+        await ctx.reply(
+          '❌ Invalid username. Must be 4+ characters (letters, digits, underscores), no spaces.\n\nTry again or /cancel.',
+        );
+        awaiting.set(userId, 'add_tg_channel'); // keep awaiting
+        return;
+      }
+      const url = `https://t.me/s/${username}`;
+      SubsRepo.add(url);
+      await ctx.reply(
+        `✅ Added Telegram channel:\n<code>${escapeHtml(url)}</code>\n\nThe bot will scrape this channel's public posts for V2Ray configs during the next scrape cycle.`,
+        { parse_mode: 'HTML' },
+      );
       const v = subsMenu();
       await ctx.reply(v.text, { parse_mode: 'HTML', reply_markup: v.keyboard });
       return;

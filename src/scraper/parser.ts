@@ -252,10 +252,24 @@ function detectProtocol(raw: string): Protocol | null {
   return null;
 }
 
+function decodeHtmlEntities(text: string): string {
+  // Decode HTML entities so t.me/s/ channel pages (which return HTML) work correctly.
+  // &amp; in query strings is the most common issue: vmess://...?key=val&amp;key2=val2
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(parseInt(code, 10)));
+}
+
 export function parseConfigsFromText(text: string): ParsedConfig[] {
+  // Stage 0: decode HTML entities (handles t.me/s/ channel pages and similar HTML sources).
+  let body = decodeHtmlEntities(text);
   // Stage 1: unwrap a whole-body base64 blob (some sources do this).
-  let body = unwrapBase64(text);
-  // Stage 2: also decode per-line in case some lines are individually base64.
+  body = unwrapBase64(body);
+  // Stage 2: decode per-line base64 blobs.
   body = decodePerLine(body);
 
   const matches = body.match(PROTOCOL_RE) ?? [];
