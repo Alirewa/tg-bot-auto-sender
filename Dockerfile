@@ -22,8 +22,13 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      tini ca-certificates \
+      tini ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install xray-core — required for real VPN validation (Scan menu's xray test).
+# Falls back gracefully at runtime if this ever fails (bot still works without it).
+RUN bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install \
+    && apt-get purge -y unzip && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
